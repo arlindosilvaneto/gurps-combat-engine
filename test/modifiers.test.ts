@@ -46,3 +46,10 @@ test('stored modifiers cannot be altered through the set', () => {
   const { modifier } = new ModifierSet().add({ label: 'a', value: 1, appliesTo: ['attack'] });
   assert.throws(() => (modifier.appliesTo as string[]).push('defense'), TypeError);
 });
+
+test('a set serializes to its modifiers and next id, so logs and snapshots keep them', () => {
+  const { set } = new ModifierSet().add({ label: 'Shock', value: -2, appliesTo: ['attack'] });
+  const json = JSON.parse(JSON.stringify(set));
+  assert.deepEqual(json, { items: [{ id: 'mod-1', label: 'Shock', value: -2, appliesTo: ['attack'] }], nextId: 2 });
+  assert.deepEqual(JSON.parse(JSON.stringify(new ModifierSet())), { items: [], nextId: 1 });
+});

@@ -66,6 +66,33 @@ test('reset restores the initial state with a fresh context', () => {
   assert.deepEqual(snap.history, []);
 });
 
+test('a transition can choose its target from the context after assign', () => {
+  type Phase = 'counting' | 'done';
+  type Tick = { type: 'TICK' };
+  const machine = createMachine<Phase, { n: number }, Tick>({
+    initial: 'counting',
+    initialContext: () => ({ n: 0 }),
+    states: {
+      counting: { on: { TICK: { assign: (ctx) => ({ n: ctx.n + 1 }), target: (ctx) => (ctx.n >= 2 ? 'done' : 'counting') } } },
+      done: {},
+    },
+  });
+  assert.equal(machine.send({ type: 'TICK' }).state, 'counting');
+  const last = machine.send({ type: 'TICK' });
+  assert.equal(last.state, 'done', 'the target saw the updated count');
+  assert.deepEqual(last.history.map((h) => h.to), ['counting', 'done']);
+});
+
+test('a computed target that names an unknown state throws and commits nothing', () => {
+  const machine = createMachine<'a' | 'b', { n: number }, { type: 'GO' }>({
+    initial: 'a',
+    initialContext: () => ({ n: 0 }),
+    states: { a: { on: { GO: { assign: (ctx) => ({ n: ctx.n + 1 }), target: () => 'nowhere' as 'b' } } }, b: {} },
+  });
+  assert.throws(() => machine.send({ type: 'GO' }), /unknown state "nowhere"/);
+  assert.deepEqual(machine.snapshot(), { state: 'a', context: { n: 0 }, history: [] });
+});
+
 test('a definition pointing at an unknown state is rejected up front', () => {
   const broken = definition();
   assert.throws(
@@ -82,4 +109,16 @@ test('a definition pointing at an unknown state is rejected up front', () => {
   );
   // @ts-expect-error 'missing' is not a declared state.
   assert.throws(() => createMachine({ ...broken, initial: 'missing' }), /not defined/);
+});
+
+test('state names that exist on every object are not states', () => {
+  assert.throws(() => createMachine({ ...definition(), initial: 'toString' as State }), /not defined/);
+
+  const machine = createMachine<'a' | 'b', { n: number }, { type: 'GO' }>({
+    initial: 'a',
+    initialContext: () => ({ n: 0 }),
+    states: { a: { on: { GO: { assign: (ctx) => ({ n: ctx.n + 1 }), target: () => 'toString' as 'b' } } }, b: {} },
+  });
+  assert.throws(() => machine.send({ type: 'GO' }), /unknown state "toString"/);
+  assert.deepEqual(machine.snapshot(), { state: 'a', context: { n: 0 }, history: [] });
 });

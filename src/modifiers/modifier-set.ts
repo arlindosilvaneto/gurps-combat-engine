@@ -57,6 +57,11 @@ export class ModifierSet {
     );
   }
 
+  /** Plain data, so snapshots and logs containing a set serialize usefully (private fields never do). */
+  toJSON(): { items: readonly Modifier[]; nextId: number } {
+    return { items: this.#items, nextId: this.#nextId };
+  }
+
   get(id: string): Modifier | undefined {
     return this.#items.find((modifier) => modifier.id === id);
   }
