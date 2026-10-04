@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "description": "Combat engine toolkit for GURPS 4th Edition: dice manager, roll modifiers, and a resettable combat state machine.",
   "license": "UNLICENSED",
-  "private": true,
   "type": "module",
   "exports": {
     ".": {
