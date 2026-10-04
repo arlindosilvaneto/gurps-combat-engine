@@ -1,7 +1,7 @@
 import { combatStats, type GurpsCharacter } from '@gurps-sheet/character';
 import type { CombatView, FighterView } from '../combat/combat.js';
 import type { DefenseKind } from '../combat/maneuvers.js';
-import type { DefenseChoice, DefenseOption, TurnResult } from '../combat/types.js';
+import type { DefenseChoice, DefenseOption, InjuryEffects, TurnResult } from '../combat/types.js';
 import type { SuccessRollResult } from '../rules/success-roll.js';
 
 const OUTCOME: Record<SuccessRollResult['outcome'], string> = {
@@ -42,6 +42,34 @@ const defenseVerb = (choice: DefenseChoice, parryName: (id: string) => string): 
   return choice.retreat ? `${verb}, retreating` : verb;
 };
 
+/** "Shock -2, Stunned" or "Unconscious": the conditions worth showing, or an empty string (also for anyone down). */
+export function conditionsText(fighter: Pick<FighterView, 'conditions' | 'defeated'>): string {
+  const { shock, stun, unconscious } = fighter.conditions;
+  if (unconscious) return 'Unconscious';
+  if (fighter.defeated) return '';
+  const parts: string[] = [];
+  if (shock > 0) parts.push(`Shock -${shock}`);
+  if (stun === 'stunned') parts.push('Stunned');
+  if (stun === 'recovering') parts.push('Recovering from stun (-4 defenses)');
+  return parts.join(', ');
+}
+
+/** What an injury did beyond HP, as sentences. Nothing for someone the injury put down: it no longer matters. */
+function effectsText(name: string, effects: InjuryEffects | null, down: boolean): string[] {
+  if (!effects || (down && effects.knockdown === 'none')) return [];
+  const lines: string[] = [];
+  if (effects.shock > 0) lines.push(`  ${name} is in shock: -${effects.shock} on their next turn.`);
+  if (effects.majorWound) {
+    if (!effects.knockdownRoll) {
+      lines.push(`  Major wound!`);
+    } else {
+      const outcome = { none: 'stays on their feet', stunned: 'is stunned', unconscious: 'is knocked out' }[effects.knockdown];
+      lines.push(`  Major wound! ${name} rolls HT: ${describeRoll(effects.knockdownRoll)}, and ${outcome}.`);
+    }
+  }
+  return lines;
+}
+
 /** One turn as a few sentences, with every roll. Read HP from `view`, taken after the turn. */
 export function describeTurn(result: TurnResult, view: CombatView): string {
   const fighter = (id: string) => view.fighters.find((candidate) => candidate.id === id);
@@ -51,6 +79,10 @@ export function describeTurn(result: TurnResult, view: CombatView): string {
 
   if (!result.attack) {
     if (result.maneuver === 'all-out-defense' && result.increase) return `${head} takes All-Out Defense: +2 ${DEFENSE[result.increase]} until their next turn.`;
+    if (result.recovery) {
+      const after = result.recovery.success ? 'shakes off the stun and can act next turn' : 'is still stunned';
+      return `${head} is stunned and does nothing. HT roll to recover: ${describeRoll(result.recovery)}, and ${after}.`;
+    }
     return `${head} does nothing.`;
   }
 
@@ -77,8 +109,10 @@ export function describeTurn(result: TurnResult, view: CombatView): string {
     `  Hit! ${damage.roll.notation} = ${injury.basic} ${damage.type}, DR ${injury.dr}: ${injury.injury} HP` +
       (target ? `. ${target.name} is at ${target.hp.current}/${target.hp.max} HP${target.defeated ? ' and is down' : ''}.` : '.'),
   );
+  lines.push(...effectsText(name(attack.targetId), attack.targetEffects, (target?.hp.current ?? 1) <= 0));
   if (attack.selfInjury && attack.selfInjury.injury > 0 && actor) {
     lines.push(`  ${actor.name} hurts themselves on the armor: ${attack.selfInjury.injury} HP (${actor.hp.current}/${actor.hp.max}).`);
+    lines.push(...effectsText(actor.name, attack.attackerEffects, actor.hp.current <= 0));
   }
   return lines.join('\n');
 }
@@ -105,11 +139,12 @@ export function statusTable(view: CombatView): string {
   const rows = view.fighters.map((fighter) => {
     const marker = fighter.id === view.awaitingId ? '>' : ' ';
     const who = `${fighter.name} [${fighter.side}]`.padEnd(nameWidth);
-    const hp = fighter.defeated ? 'DOWN'.padEnd(9) : `${fighter.hp.current}/${fighter.hp.max} HP`.padEnd(9);
+    const hp = (fighter.conditions.unconscious ? 'OUT' : fighter.defeated ? 'DOWN' : `${fighter.hp.current}/${fighter.hp.max} HP`).padEnd(9);
+    const conditions = conditionsText(fighter);
     const modifiers = fighter.modifiers.length
       ? `  mods: ${fighter.modifiers.map((m) => `${m.label} ${signed(m.value)}${m.appliesTo.length ? ` (${m.appliesTo.join(', ')})` : ''}`).join('; ')}`
       : '';
-    return ` ${marker} ${who}  ${hp}  ${maneuverName(fighter).padEnd(26)}  ${defensesOf(fighter)}, DR ${fighter.dr}${modifiers}`;
+    return ` ${marker} ${who}  ${hp}  ${maneuverName(fighter).padEnd(26)}  ${defensesOf(fighter)}, DR ${fighter.dr}${conditions ? `  [${conditions}]` : ''}${modifiers}`;
   });
   return [header, ...rows].join('\n');
 }
@@ -121,7 +156,7 @@ export function sheetSummary(sheet: GurpsCharacter, fighter: FighterView): strin
   const skills = stats.skills.map((skill) => `${skill.name} ${skill.level}`).join(', ');
   return [
     `${stats.name} [${fighter.side}]`,
-    `  HP ${stats.hp.current}/${stats.hp.max}  FP ${stats.fp.current}/${stats.fp.max}`,
+    `  HP ${stats.hp.current}/${stats.hp.max}  FP ${stats.fp.current}/${stats.fp.max}${conditionsText(fighter) ? `  [${conditionsText(fighter)}]` : ''}`,
     `  ST ${st}  DX ${dx}  IQ ${iq}  HT ${ht}  Will ${stats.will}  Per ${stats.perception}`,
     `  Basic Speed ${stats.basicSpeed}  Basic Move ${stats.basicMove}  Damage thr ${stats.damage.thrust.notation}, sw ${stats.damage.swing.notation}`,
     `  ${defensesOf(fighter)}, DR ${fighter.dr} (torso)`,

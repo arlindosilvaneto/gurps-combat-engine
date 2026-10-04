@@ -45,9 +45,9 @@ function defenseScores(fighter: FighterView): Array<[DefenseKind, number]> {
 }
 
 /**
- * Roughly the defense a fighter would roll right now: its best defense with modifiers and
- * any All-Out Defense bonus, or null if its maneuver forbids defending. It ignores retreats
- * and per-turn limits (a block already used, repeated parries).
+ * Roughly the defense a fighter would roll right now: its best defense with modifiers, any
+ * All-Out Defense bonus and the -4 for being stunned, or null if its maneuver forbids
+ * defending. It ignores retreats and per-turn limits (a block already used, repeated parries).
  */
 function estimatedDefense(fighter: FighterView): number | null {
   const effects = MANEUVER_EFFECTS[fighter.maneuver];
@@ -57,15 +57,16 @@ function estimatedDefense(fighter: FighterView): number | null {
       ([kind, score]) =>
         score +
         (fighter.maneuver === 'all-out-defense' && fighter.increased === kind ? effects.defenseBonus : 0) +
-        modifierTotal(fighter, [ROLL_TAGS.defense, ROLL_TAGS[kind]]),
+        modifierTotal(fighter, [ROLL_TAGS.defense, ROLL_TAGS[kind]]) -
+        (fighter.conditions.stun === 'none' ? 0 : 4),
     ),
   );
 }
 
-/** Average HP an attack takes off `target`, never counting more than the HP it has left. */
+/** Average HP an attack takes off `target` (the attacker's shock included), never counting more than the HP it has left. */
 function expectedDamage(attacker: FighterView, attack: AttackOption, target: FighterView, extraBonus: number, defends: boolean): number {
   const e = expectedInjury({
-    skill: attack.skill + extraBonus + modifierTotal(attacker, [ROLL_TAGS.attack]),
+    skill: attack.skill + extraBonus + modifierTotal(attacker, [ROLL_TAGS.attack]) - attacker.conditions.shock,
     damage: attack.damage,
     targetDr: target.dr,
     defense: defends ? estimatedDefense(target) : null,

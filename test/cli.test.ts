@@ -219,3 +219,18 @@ test('the real command: --help, --version, and a full --auto fight', () => {
   assert.match(out, /the fight is over/);
   assert.throws(() => run('--auto', '--npc', 'fantasy-dragon:x'), /Unknown NPC "fantasy-dragon"/);
 });
+
+test('format: shock, a major wound with its HT roll, stun and recovery all read clearly', async () => {
+  const { rurik, fenrir, newCombat: combatOf, scripted: diceOf } = await import('./fixtures.js');
+  // Rurik's axe wounds Fenrir for 18 HP (major on 24 HP); HT 13 roll 15 fails: stunned. Then his failed recovery roll.
+  const combat = combatOf(diceOf(3, 3, 3, 6, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5), [rurik(), fenrir()]);
+  play(combat, { maneuver: 'do-nothing' });
+  const wound = describeTurn(play(combat, { maneuver: 'attack', attackId: 'Machado#1', targetId: 'fenrir' }), combat.view());
+  assert.match(wound, /Hit! 2d\+1 = 12 cut, DR 0: 18 HP\. Fenrir is at 6\/24 HP\./);
+  assert.match(wound, /Fenrir is in shock: -4 on their next turn\./);
+  assert.match(wound, /Major wound! Fenrir rolls HT: rolled 15 vs 13: failure, and is stunned\./);
+  assert.match(statusTable(combat.view()), /Fenrir \[b\].*\[Shock -4, Stunned\]/);
+
+  const stuck = describeTurn(play(combat, { maneuver: 'do-nothing' }), combat.view());
+  assert.match(stuck, /Fenrir is stunned and does nothing\. HT roll to recover: rolled 15 vs 13: failure, and is still stunned\./);
+});

@@ -43,6 +43,8 @@ export interface Combatant {
   readonly side: string;
   readonly basicSpeed: number;
   readonly dx: number;
+  /** For HT rolls: a major wound's knockdown roll and recovering from stun. */
+  readonly ht: number;
   /** Dodge at no encumbrance. Encumbrance levels are not modelled yet. */
   readonly dodge: number;
   /** Torso DR. Hit locations are not modelled yet, so every hit lands on the torso (p.378). */
@@ -116,6 +118,7 @@ export function combatantFromCharacter(character: GurpsCharacter, options: Comba
     side: options.side,
     basicSpeed: stats.basicSpeed,
     dx: stats.attributes.dx,
+    ht: stats.attributes.ht,
     dodge: stats.dodge,
     dr: torso?.dr ?? 0,
     attacks,

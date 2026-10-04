@@ -94,15 +94,19 @@ test('a group is numbered, and its members are independent: hurting one leaves t
   assert.throws(() => npcGroup({ npc: 'fantasy-town-guard', side: 'b', count: 0 }), RangeError);
 
   // The knight (Speed 6.25) acts first and swings at guard 1. Faces: the guards' tie roll-off (5, 2), then
-  // attack 3+3+3=9 vs 16 (hit), Dodge 6+6+6=18 vs 8 (fails), damage 4+4=8 less DR 2, x1.5 cut = 9.
+  // attack 3+3+3=9 vs 16 (hit), Dodge 6+6+6=18 vs 8 (fails), damage 4+4=8 less DR 2, x1.5 cut = 9. That is
+  // more than half of 11 HP, a major wound, so the guard rolls HT 12: 3+3+4 = 10 keeps him on his feet.
   const knight = npcCombatant('fantasy-mercenary-knight', { side: 'a' }).combatant;
   const [one, two] = npcGroup({ npc: 'fantasy-town-guard', side: 'b', count: 2 }).map((g) => g.combatant);
-  const combat = newCombat(scripted(5, 2, 3, 3, 3, 6, 6, 6, 4, 4), [knight, one!, two!]);
+  const combat = newCombat(scripted(5, 2, 3, 3, 3, 6, 6, 6, 4, 4, 3, 3, 4), [knight, one!, two!]);
   const max = hp(combat, 'fantasy-town-guard-1');
   assert.equal(max, hp(combat, 'fantasy-town-guard-2'));
 
   const result = play(combat, { maneuver: 'attack', attackId: knight.attacks[0]!.id, targetId: 'fantasy-town-guard-1' });
   assert.equal(result.attack?.damage?.injury.injury, 9);
+  assert.equal(result.attack?.targetEffects?.majorWound, true);
+  assert.equal(result.attack?.targetEffects?.knockdown, 'none');
+  assert.equal(result.attack?.targetEffects?.shock, 4, '9 HP of shock, capped at 4');
   assert.equal(hp(combat, 'fantasy-town-guard-1'), max - 9);
   assert.equal(hp(combat, 'fantasy-town-guard-2'), max, 'the other guard is untouched');
 });
@@ -138,8 +142,9 @@ test('every NPC that can attack can fight another one without breaking the engin
 test('sheetOf shows a fighter\'s current sheet, HP included, as a copy', () => {
   const knight = npcCombatant('fantasy-mercenary-knight', { side: 'a' }).combatant;
   const guard = npcCombatant('fantasy-town-guard', { side: 'b' }).combatant;
-  // Knight is faster: Speed 6.25 vs 5.75. His broadsword swing: hit (9 vs 16), the guard's Dodge 8 fails (18), damage 3+3 = 6.
-  const combat = newCombat(scripted(3, 3, 3, 6, 6, 6, 3, 3), [knight, guard]);
+  // Knight is faster: Speed 6.25 vs 5.75. His broadsword swing: hit (9 vs 16), the guard's Dodge 8 fails (18),
+  // damage 3+3 = 6 (DR 2, x1.5: 6 HP, a major wound on 11 HP), and the guard's HT roll 3+3+4 = 10 succeeds.
+  const combat = newCombat(scripted(3, 3, 3, 6, 6, 6, 3, 3, 3, 3, 4), [knight, guard]);
   const before = combat.sheetOf(guard.id);
   const max = hp(combat, guard.id);
 
