@@ -1,0 +1,20 @@
+{
+  // Type-checks sources and tests (`npm run typecheck`); tsconfig.build.json emits dist/.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": false,
+    "noEmit": true
+  },
+  "include": ["src", "test"]
+}
