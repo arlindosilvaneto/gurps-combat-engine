@@ -36,17 +36,17 @@ export interface ExpectedInjuryInput {
   readonly skill: number;
   readonly damage: { readonly notation: string; readonly type: WoundingType };
   readonly targetDr: number;
-  /** The target's Dodge with modifiers applied, or null if it can't defend. */
-  readonly dodge: number | null;
+  /** The defense the target would roll against (Dodge, Parry or Block, modifiers applied), or null if it can't defend. */
+  readonly defense: number | null;
 }
 
 /**
  * The average HP an attack takes off its target: the chance to hit, times the chance
- * the target fails to dodge (a critical hit can't be dodged), times the average injury
+ * the target fails to defend (a critical hit can't be defended), times the average injury
  * after DR and the wounding modifier. Computed exactly from the dice, not approximated.
  * It ignores what the attacker risks in return (Hurting Yourself).
  */
-export function expectedInjury({ skill, damage, targetDr, dodge }: ExpectedInjuryInput): number {
+export function expectedInjury({ skill, damage, targetDr, defense }: ExpectedInjuryInput): number {
   const { count, sides, modifier } = parseNotation(damage.notation);
   const floor = damage.type === 'cr' ? 0 : 1;
   const perHit = diceDistribution(count, sides).reduce(
@@ -54,11 +54,11 @@ export function expectedInjury({ skill, damage, targetDr, dodge }: ExpectedInjur
     0,
   );
 
-  const dodged = dodge === null ? 0 : successChance(dodge);
+  const defended = defense === null ? 0 : successChance(defense);
   const landed = THREE_D.reduce((sum, [total, p]) => {
     const { outcome } = classifyRoll(total, skill);
     if (outcome === 'critical-success') return sum + p;
-    return outcome === 'success' ? sum + p * (1 - dodged) : sum;
+    return outcome === 'success' ? sum + p * (1 - defended) : sum;
   }, 0);
   return landed * perHit;
 }

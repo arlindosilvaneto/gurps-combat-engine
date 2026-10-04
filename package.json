@@ -1,7 +1,7 @@
 {
   "name": "@gurps-sheet/engine",
-  "version": "0.1.1",
-  "description": "Combat engine toolkit for GURPS 4th Edition: dice manager, roll modifiers, and a resettable combat state machine.",
+  "version": "0.2.0",
+  "description": "Combat engine for GURPS 4th Edition: rules-faithful melee with Dodge, Parry and Block, a dice manager, roll modifiers, a resettable combat state machine, and a gurps-combat CLI.",
   "license": "UNLICENSED",
   "type": "module",
   "exports": {
@@ -11,16 +11,21 @@
     }
   },
   "types": "./dist/index.d.ts",
+  "bin": {
+    "gurps-combat": "./dist/cli/main.js"
+  },
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "prepare": "npm run build",
     "typecheck": "tsc -p tsconfig.json",
     "test": "npm run typecheck && npm run test:unit",
-    "test:unit": "node --import tsx --test test/*.test.ts"
+    "test:unit": "node --import tsx --test test/*.test.ts",
+    "cli": "node --import tsx src/cli/main.ts"
   },
   "dependencies": {
     "@gurps-sheet/character": "^0.1.0",
-    "@gurps-sheet/npcs": "^0.1.0"
+    "@gurps-sheet/npcs": "^0.1.0",
+    "@inquirer/prompts": "^8.7.3"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

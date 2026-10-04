@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   bestExpectedInjury,
   CombatError,
+  isAttackAction,
   combatantFromCharacter,
   createCombat,
   createDiceManager,
@@ -11,7 +12,7 @@ import {
   type Combatant,
   type TurnAction,
 } from '../src/index.js';
-import { FENRIR, FIXED_TIME, fenrir, hp, loadExample, newCombat, RURIK, rurik, scripted } from './fixtures.js';
+import { FENRIR, FIXED_TIME, fenrir, hp, loadExample, newCombat, play, RURIK, rurik, scripted } from './fixtures.js';
 
 // Fenrir (Speed 6.5) acts before Rurik (Speed 6). See `fighter()` in fixtures.ts for their stats.
 const fenrirPunchesRurik: TurnAction = { maneuver: 'attack', attackId: 'punch', targetId: RURIK };
@@ -32,12 +33,12 @@ test('a new combat starts at round 1 with the faster fighter up and everyone at 
 test('a hit: attack roll, failed dodge, then damage reduced by DR (p.369, p.374, p.378)', () => {
   // Fenrir's attack 3+3+3=9 vs 14: hits. Rurik's Dodge 9 vs 18: fails. Damage 3+4-2=5, DR 4 -> 1 penetrating, x1 cr -> 1 HP.
   const combat = newCombat(scripted(3, 3, 3, 6, 6, 6, 3, 4));
-  const result = combat.takeTurn(fenrirPunchesRurik);
+  const result = play(combat, fenrirPunchesRurik);
 
   assert.equal(result.attack?.outcome, 'hit');
   assert.equal(result.attack?.attackRoll.roll.total, 9);
-  assert.equal(result.attack?.defense?.effectiveSkill, 9);
-  assert.equal(result.attack?.defense?.success, false);
+  assert.equal(result.attack?.defense?.roll?.effectiveSkill, 9);
+  assert.equal(result.attack?.defense?.roll?.success, false);
   assert.equal(result.attack?.damage?.injury.penetrating, 1);
   assert.equal(result.attack?.damage?.injury.injury, 1);
   assert.equal(hp(combat, RURIK), 14);
@@ -49,7 +50,7 @@ test('a hit: attack roll, failed dodge, then damage reduced by DR (p.369, p.374,
 test('a successful dodge stops the attack and no damage is rolled', () => {
   const dice = scripted(3, 3, 3, 2, 2, 2); // defense 6 <= 9; no damage faces scripted: rolling them would throw
   const combat = newCombat(dice);
-  const result = combat.takeTurn(fenrirPunchesRurik);
+  const result = play(combat, fenrirPunchesRurik);
   assert.equal(result.attack?.outcome, 'defended');
   assert.equal(result.attack?.damage, null);
   assert.equal(result.attack?.selfInjury, null);
@@ -59,7 +60,7 @@ test('a successful dodge stops the attack and no damage is rolled', () => {
 
 test('a missed attack costs the target no defense roll', () => {
   const combat = newCombat(scripted(6, 6, 6)); // 18 always misses; only 3 faces scripted
-  const result = combat.takeTurn(fenrirPunchesRurik);
+  const result = play(combat, fenrirPunchesRurik);
   assert.equal(result.attack?.outcome, 'miss');
   assert.equal(result.attack?.defense, null);
   assert.equal(hp(combat, RURIK), 15);
@@ -68,7 +69,7 @@ test('a missed attack costs the target no defense roll', () => {
 test('a critical hit can\'t be defended against, even by a fighter who could dodge (p.374)', () => {
   // 1+1+2=4 is a critical hit. Damage 3+3-2=4 is stopped by Rurik's DR 4, so no injury - but no defense roll either.
   const combat = newCombat(scripted(1, 1, 2, 3, 3));
-  const result = combat.takeTurn(fenrirPunchesRurik);
+  const result = play(combat, fenrirPunchesRurik);
   assert.equal(result.attack?.criticalHit, true);
   assert.equal(result.attack?.defense, null);
   assert.equal(result.attack?.outcome, 'hit');
@@ -81,28 +82,28 @@ test('Hurting Yourself: only unarmed hits on DR 3+ cost the attacker (p.379)', (
   // Rurik's axe hits armored Fenrir: armed, so nothing back. Axe damage 3+3+1=7.
   const armored = [rurik(), { ...fenrir(), dr: 4 }];
   const axe = newCombat(scripted(3, 3, 3, 6, 6, 6, 3, 3), armored);
-  axe.takeTurn(pass);
-  assert.equal(axe.takeTurn(rurikAxesFenrir('attack')).attack?.selfInjury, null);
+  play(axe, pass);
+  assert.equal(play(axe, rurikAxesFenrir('attack')).attack?.selfInjury, null);
   assert.equal(hp(axe, RURIK), 15);
 
   // Rurik punches the same armor. His punch is 1d-1, so a 6 is 5 basic damage: 5 / 5 = 1 HP back.
   const punch = newCombat(scripted(3, 3, 3, 6, 6, 6, 6), armored);
-  punch.takeTurn(pass);
-  const result = punch.takeTurn({ maneuver: 'attack', attackId: 'punch', targetId: FENRIR });
+  play(punch, pass);
+  const result = play(punch, { maneuver: 'attack', attackId: 'punch', targetId: FENRIR });
   assert.equal(result.attack?.damage?.injury.basic, 5);
   assert.equal(result.attack?.selfInjury?.injury, 1);
   assert.equal(hp(punch, RURIK), 14);
 
   // Unarmored target (DR 0): the rule doesn't apply at all.
   const bare = newCombat(scripted(3, 3, 3, 6, 6, 6, 6));
-  bare.takeTurn(pass);
-  assert.equal(bare.takeTurn({ maneuver: 'attack', attackId: 'punch', targetId: FENRIR }).attack?.selfInjury, null);
+  play(bare, pass);
+  assert.equal(play(bare, { maneuver: 'attack', attackId: 'punch', targetId: FENRIR }).attack?.selfInjury, null);
 });
 
 test('self-injury is capped at the target\'s DR and can defeat the puncher', () => {
   // Both at 1 HP. Fenrir hits Rurik for 10 basic (DR 4 -> 6 injury) and is hurt for min(10/5, DR 4) = 2: they fall together.
   const combat = newCombat(scripted(3, 3, 3, 6, 6, 6, 6, 6), [rurik({ damage: 14 }), fenrir({ damage: 23 })]);
-  combat.takeTurn(fenrirPunchesRurik);
+  play(combat, fenrirPunchesRurik);
   assert.equal(hp(combat, RURIK), -5);
   assert.equal(hp(combat, FENRIR), -1);
   const view = combat.view();
@@ -113,13 +114,13 @@ test('self-injury is capped at the target\'s DR and can defeat the puncher', () 
 test('All-Out Attack (Determined) gives +4 to hit (p.365)', () => {
   // Rurik's axe is skill 13. A 16 misses a plain Attack but hits at 13+4=17.
   const plain = newCombat(scripted(6, 5, 5));
-  plain.takeTurn(pass);
-  assert.equal(plain.takeTurn(rurikAxesFenrir('attack')).attack?.outcome, 'miss');
+  play(plain, pass);
+  assert.equal(play(plain, rurikAxesFenrir('attack')).attack?.outcome, 'miss');
 
   // Hit; Fenrir's Dodge 12 vs 18 fails; damage 3+3+1=7, no DR, cut x1.5 = 10.5 -> 10 HP.
   const allOut = newCombat(scripted(6, 5, 5, 6, 6, 6, 3, 3));
-  allOut.takeTurn(pass);
-  const result = allOut.takeTurn(rurikAxesFenrir('all-out-attack'));
+  play(allOut, pass);
+  const result = play(allOut, rurikAxesFenrir('all-out-attack'));
   assert.equal(result.attack?.attackRoll.effectiveSkill, 17);
   assert.equal(result.attack?.attackRoll.modifier, 4);
   assert.equal(result.attack?.outcome, 'hit');
@@ -130,12 +131,12 @@ test('All-Out Attack (Determined) gives +4 to hit (p.365)', () => {
 test('someone who made an All-Out Attack has no defense until their next turn (p.365)', () => {
   // Fenrir all-out attacks: Rurik's defense roll fails (18), damage 6+6-2=10, DR 4 -> 6 HP (and 2 back at Fenrir).
   const combat = newCombat(scripted(3, 3, 3, 6, 6, 6, 6, 6, /* Rurik's turn: */ 3, 3, 3, 3, 3));
-  combat.takeTurn({ ...fenrirPunchesRurik, maneuver: 'all-out-attack' });
+  play(combat, { ...fenrirPunchesRurik, maneuver: 'all-out-attack' });
   assert.equal(hp(combat, RURIK), 9);
   assert.equal(hp(combat, FENRIR), 22);
 
   // Rurik's axe hits (9 vs 13) and Fenrir gets no dodge: only attack + damage faces are scripted.
-  const result = combat.takeTurn(rurikAxesFenrir('attack'));
+  const result = play(combat, rurikAxesFenrir('attack'));
   assert.equal(result.attack?.defense, null);
   assert.equal(result.attack?.outcome, 'hit');
   assert.equal(hp(combat, FENRIR), 22 - 10, 'damage 3+3+1=7, cut x1.5 -> 10');
@@ -143,17 +144,17 @@ test('someone who made an All-Out Attack has no defense until their next turn (p
 
 test('All-Out Defense (Increased Dodge) gives +2 to Dodge (p.366)', () => {
   const combat = newCombat(scripted(3, 3, 3, 4, 4, 4));
-  combat.takeTurn({ maneuver: 'all-out-defense' });
-  const result = combat.takeTurn(rurikAxesFenrir('attack'));
-  assert.equal(result.attack?.defense?.effectiveSkill, 14, 'Dodge 12 + 2');
-  assert.equal(result.attack?.defense?.modifier, 2);
+  play(combat, { maneuver: 'all-out-defense', increase: 'dodge' });
+  const result = play(combat, rurikAxesFenrir('attack'));
+  assert.equal(result.attack?.defense?.roll?.effectiveSkill, 14, 'Dodge 12 + 2');
+  assert.equal(result.attack?.defense?.roll?.modifier, 2);
   assert.equal(result.attack?.outcome, 'defended');
 });
 
 test('a hit that leaves the target at 0 or less defeats them and ends the fight', () => {
   // Rurik starts at 1 HP. Fenrir hits for 6 (damage 6+6-2=10, DR 4).
   const combat = newCombat(scripted(3, 3, 3, 6, 6, 6, 6, 6), [rurik({ damage: 14 }), fenrir()]);
-  combat.takeTurn(fenrirPunchesRurik);
+  play(combat, fenrirPunchesRurik);
 
   const view = combat.view();
   assert.equal(hp(combat, RURIK), -5);
@@ -169,7 +170,7 @@ test('a hit that leaves the target at 0 or less defeats them and ends the fight'
 test('once the fight is over, every request is refused with a CombatError', () => {
   const combat = newCombat(scripted(3, 3, 3, 6, 6, 6, 6, 6), [rurik({ damage: 14 }), fenrir()]);
   const modifier = combat.addModifier(FENRIR, { label: 'early', value: 1 });
-  combat.takeTurn(fenrirPunchesRurik);
+  play(combat, fenrirPunchesRurik);
   assert.equal(combat.view().status, 'finished');
 
   assert.throws(() => combat.addModifier(FENRIR, { label: 'late', value: 1 }), CombatError);
@@ -179,9 +180,9 @@ test('once the fight is over, every request is refused with a CombatError', () =
 
 test('the round counter advances once everyone has acted', () => {
   const combat = newCombat(scripted());
-  combat.takeTurn(pass);
+  play(combat, pass);
   assert.deepEqual([combat.view().round, combat.view().currentId], [1, RURIK]);
-  combat.takeTurn(pass);
+  play(combat, pass);
   assert.deepEqual([combat.view().round, combat.view().currentId], [2, FENRIR]);
 });
 
@@ -192,11 +193,11 @@ test('turns skip defeated fighters', () => {
   const combat = newCombat(scripted(5, 2, 3, 3, 3, 6, 6, 6, 6, 6), [rurik(), second, fenrir()]);
   assert.deepEqual(combat.view().fighters.map((f) => f.id), [FENRIR, RURIK, 'rurik-b']);
 
-  combat.takeTurn({ maneuver: 'attack', attackId: 'punch', targetId: 'rurik-b' });
+  play(combat, { maneuver: 'attack', attackId: 'punch', targetId: 'rurik-b' });
   assert.equal(combat.view().fighters.find((f) => f.id === 'rurik-b')?.defeated, true);
   assert.equal(combat.view().status, 'in-progress');
 
-  combat.takeTurn(pass); // rurik
+  play(combat, pass); // rurik
   assert.deepEqual([combat.view().round, combat.view().currentId], [2, FENRIR], 'rurik-b is skipped');
 });
 
@@ -204,7 +205,7 @@ test('illegal actions are refused without rolling dice or changing anything', ()
   const dice = scripted(5, 2); // the roll-off between the two Ruriks
   const combat = newCombat(dice, [rurik(), rurik({ id: 'rurik-2' }), fenrir()]);
   const before = combat.snapshot().history.length;
-  combat.takeTurn(pass); // Fenrir
+  play(combat, pass); // Fenrir
   const afterPass = combat.snapshot().history.length;
   assert.equal(afterPass, before + 1);
 
@@ -234,23 +235,27 @@ test('takeTurn accepts exactly the legal actions: legalActions is the single sou
 test('legalActions lists the passive maneuvers and attacks on every standing enemy', () => {
   const combat = newCombat(scripted(5, 2), [rurik(), rurik({ id: 'rurik-2' }), fenrir()]);
   const actions = combat.legalActions();
-  assert.equal(actions.length, 2 + 2 * 2, 'Fenrir has one attack; two enemies; Attack and All-Out Attack each');
+  assert.equal(actions.length, 3 + 2 * 2, 'Do Nothing + All-Out Defense (Dodge, Parry); one attack x two enemies x Attack/All-Out Attack');
   assert.ok(actions.every((a) => !('targetId' in a) || a.targetId !== FENRIR));
-  assert.deepEqual(actions.slice(0, 2), [{ maneuver: 'do-nothing' }, { maneuver: 'all-out-defense' }]);
+  assert.deepEqual(actions.slice(0, 3), [
+    { maneuver: 'do-nothing' },
+    { maneuver: 'all-out-defense', increase: 'dodge' },
+    { maneuver: 'all-out-defense', increase: 'parry' },
+  ]);
 });
 
 test('modifiers added during the fight change the roll, and removing them restores it', () => {
   // Fenrir's punch is skill 14. A -3 situational penalty makes a 12 miss; without it a 12 hits.
   const penalised = newCombat(scripted(4, 4, 4));
   penalised.addModifier(FENRIR, { label: 'Dim light', value: -3, appliesTo: ['attack'] });
-  const miss = penalised.takeTurn(fenrirPunchesRurik);
+  const miss = play(penalised, fenrirPunchesRurik);
   assert.equal(miss.attack?.attackRoll.effectiveSkill, 11);
   assert.equal(miss.attack?.outcome, 'miss');
 
   const cleared = newCombat(scripted(4, 4, 4, 6, 6, 6, 3, 3));
   const modifier = cleared.addModifier(FENRIR, { label: 'Dim light', value: -3, appliesTo: ['attack'] });
   cleared.removeModifier(FENRIR, modifier.id);
-  assert.equal(cleared.takeTurn(fenrirPunchesRurik).attack?.attackRoll.effectiveSkill, 14);
+  assert.equal(play(cleared, fenrirPunchesRurik).attack?.attackRoll.effectiveSkill, 14);
 });
 
 test('modifiers can be edited, are tagged per roll, and show up in the view and history', () => {
@@ -260,7 +265,7 @@ test('modifiers can be edited, are tagged per roll, and show up in the view and 
   combat.updateModifier(FENRIR, penalty.id, { value: -1 });
 
   assert.deepEqual(combat.view().fighters[0]?.modifiers.map((m) => [m.label, m.value]), [['Slippery', -1], ['Bless', 1]]);
-  const attack = combat.takeTurn(fenrirPunchesRurik);
+  const attack = play(combat, fenrirPunchesRurik);
   assert.equal(attack.attack?.attackRoll.effectiveSkill, 13, 'the defense-only modifier does not touch the attack');
   assert.equal(attack.attack?.attackRoll.roll.total, 14, '5+5+4 misses skill 13');
   assert.deepEqual(
@@ -282,7 +287,7 @@ test('the history is plain data: it survives JSON, modifiers and all', () => {
   const combat = newCombat(scripted(6, 6, 6));
   const modifier = combat.addModifier(FENRIR, { label: 'Dim light', value: -3, appliesTo: ['attack'] });
   combat.updateModifier(FENRIR, modifier.id, { value: -2 });
-  combat.takeTurn(fenrirPunchesRurik);
+  play(combat, fenrirPunchesRurik);
 
   const log = JSON.parse(JSON.stringify(combat.snapshot().history));
   assert.deepEqual(log[0].event, { type: 'ADD_MODIFIER', fighterId: FENRIR, modifier: { label: 'Dim light', value: -3, appliesTo: ['attack'] } });
@@ -296,8 +301,8 @@ test('the history is plain data: it survives JSON, modifiers and all', () => {
 test('reset restarts the fight: HP back from the starting sheets, round 1, no modifiers, empty history', () => {
   const combat = newCombat(scripted(3, 3, 3, 6, 6, 6, 3, 4));
   combat.addModifier(RURIK, { label: 'Blessed', value: 1 });
-  combat.takeTurn(fenrirPunchesRurik);
-  combat.takeTurn({ maneuver: 'all-out-defense' });
+  play(combat, fenrirPunchesRurik);
+  play(combat, { maneuver: 'all-out-defense', increase: 'dodge' });
   assert.equal(hp(combat, RURIK), 14);
 
   combat.reset();
@@ -313,7 +318,7 @@ test('reset restarts the fight: HP back from the starting sheets, round 1, no mo
 test('reset restores a fighter to the HP its sheet started with, which may not be full', () => {
   const combat = newCombat(scripted(3, 3, 3, 6, 6, 6, 3, 4), [rurik({ damage: 10 }), fenrir()]);
   assert.equal(hp(combat, RURIK), 5);
-  combat.takeTurn(fenrirPunchesRurik);
+  play(combat, fenrirPunchesRurik);
   assert.equal(hp(combat, RURIK), 4);
   combat.reset();
   assert.equal(hp(combat, RURIK), 5, 'not 15');
@@ -323,7 +328,7 @@ test('the roster is copied: changing the caller\'s array afterwards changes noth
   const roster: Combatant[] = [rurik(), fenrir()];
   const combat = createCombat(roster, { dice: scripted(), clock: () => FIXED_TIME });
   roster.push(rurik({ id: 'latecomer' }));
-  assert.equal(combat.legalActions().length, 4);
+  assert.equal(combat.legalActions().length, 5, 'Fenrir: Do Nothing, All-Out Defense x2, and Attack/All-Out Attack on Rurik');
   assert.deepEqual(combat.view().fighters.map((f) => f.id), [FENRIR, RURIK]);
   combat.reset();
   assert.deepEqual(combat.view().fighters.map((f) => f.id), [FENRIR, RURIK]);
@@ -378,9 +383,11 @@ test('the policy keeps its defense when All-Out Attack would add nothing', () =>
   assert.equal(choice.maneuver, 'attack');
 });
 
-test('with nothing to attack the policy takes All-Out Defense', () => {
+test('with nothing to attack the policy takes All-Out Defense, raising its best defense', () => {
   const combat = newCombat(scripted());
-  assert.deepEqual(bestExpectedInjury(combat.view(), [{ maneuver: 'do-nothing' }]), { maneuver: 'all-out-defense' });
+  const passive = combat.legalActions().filter((action) => !isAttackAction(action));
+  // Fenrir: Dodge 12 beats his bare-handed parry (3 + 14/2 = 10).
+  assert.deepEqual(bestExpectedInjury(combat.view(), passive), { maneuver: 'all-out-defense', increase: 'dodge' });
 });
 
 test('runToCompletion plays an automated fight to the end, reproducibly from a seed', () => {

@@ -10,7 +10,10 @@ import {
   scriptedSource,
   type Combat,
   type Combatant,
+  type DefenseChoice,
   type DiceManager,
+  type TurnAction,
+  type TurnResult,
 } from '../src/index.js';
 
 export const FIXED_TIME = new Date('2026-01-01T00:00:00.000Z');
@@ -62,4 +65,10 @@ export function hp(combat: Combat, id: string): number {
   const view = combat.view().fighters.find((candidate) => candidate.id === id);
   assert.ok(view, `no fighter ${id}`);
   return view.hp.current;
+}
+
+/** Plays a whole turn: the action, then, if the attack waits for a defense, the given choice (Dodge by default). */
+export function play(combat: Combat, action: TurnAction, defense: DefenseChoice = { kind: 'dodge', retreat: false }): TurnResult {
+  const step = combat.takeTurn(action);
+  return step.status === 'resolved' ? step.result : combat.defend(defense);
 }

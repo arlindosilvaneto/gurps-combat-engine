@@ -14,18 +14,19 @@ import {
   seededSource,
   type TurnAction,
 } from '../src/index.js';
-import { FIXED_TIME, hp, newCombat, scripted } from './fixtures.js';
+import { FIXED_TIME, hp, newCombat, play, scripted } from './fixtures.js';
 
 const attackSummary = (id: string) =>
   npcCombatant(id, { side: 'x' }).combatant.attacks.map((a) => `${a.name}@${a.skill} ${a.damage.notation} ${a.damage.type}`);
 
 test('weapons are matched to skills through the Basic Set catalog: knives, staffs and cutlasses', () => {
-  // The mercenary knight carries a broadsword, a lance and a dagger (a Knife-skill weapon).
+  // The mercenary knight carries a broadsword, a lance and a dagger (a Knife-skill weapon). The lance is
+  // for fighting from horseback (p.204), which isn't modelled, so it is left out with a warning.
   const knight = npcCombatant('fantasy-mercenary-knight', { side: 'a' });
-  assert.deepEqual(knight.warnings, []);
+  assert.deepEqual(knight.warnings, ['Weapon "Lance" uses Lance, which is for mounted combat (p.204), not modelled yet']);
   assert.deepEqual(
     knight.combatant.attacks.map((a) => a.name),
-    ['Broadsword (swing)', 'Broadsword (thrust)', 'Lance', 'Dagger', 'Punch'],
+    ['Broadsword (swing)', 'Broadsword (thrust)', 'Dagger', 'Punch'],
   );
   // A cutlass uses Shortsword; the pirate captain used to be left with only his fists.
   assert.ok(attackSummary('swashbuckling-pirate-captain').some((a) => a.startsWith('Cutlass ')));
@@ -100,7 +101,7 @@ test('a group is numbered, and its members are independent: hurting one leaves t
   const max = hp(combat, 'fantasy-town-guard-1');
   assert.equal(max, hp(combat, 'fantasy-town-guard-2'));
 
-  const result = combat.takeTurn({ maneuver: 'attack', attackId: knight.attacks[0]!.id, targetId: 'fantasy-town-guard-1' });
+  const result = play(combat, { maneuver: 'attack', attackId: knight.attacks[0]!.id, targetId: 'fantasy-town-guard-1' });
   assert.equal(result.attack?.damage?.injury.injury, 9);
   assert.equal(hp(combat, 'fantasy-town-guard-1'), max - 9);
   assert.equal(hp(combat, 'fantasy-town-guard-2'), max, 'the other guard is untouched');
@@ -143,7 +144,7 @@ test('sheetOf shows a fighter\'s current sheet, HP included, as a copy', () => {
   const max = hp(combat, guard.id);
 
   const action: TurnAction = { maneuver: 'attack', attackId: knight.attacks[0]!.id, targetId: guard.id };
-  const result = combat.takeTurn(action);
+  const result = play(combat, action);
   const hurt = result.attack?.damage?.injury.injury ?? 0;
   assert.ok(hurt > 0);
 
