@@ -14,7 +14,11 @@ export interface MachineEvent {
 export type EventOf<E extends MachineEvent, T extends E['type']> = Extract<E, { type: T }>;
 
 export interface Transition<S extends string, C, E extends MachineEvent> {
-  readonly target: S;
+  /**
+   * The next state, or a function choosing it from the context *after* `assign`
+   * has run, for transitions whose destination depends on what the event did.
+   */
+  readonly target: S | ((context: C, event: E) => S);
   /** The transition is only available while this returns true. */
   readonly guard?: (context: C, event: E) => boolean;
   /** Returns the next context; must not mutate the current one. */
@@ -97,9 +101,13 @@ export function createMachine<S extends string, C, E extends MachineEvent>(
       const transition = find(event);
       if (!transition) throw new InvalidTransitionError(state, event.type);
       const from = state;
-      context = transition.assign ? transition.assign(context, event) : context;
-      state = transition.target;
-      history.push({ from, to: state, event });
+      const nextContext = transition.assign ? transition.assign(context, event) : context;
+      const to = typeof transition.target === 'function' ? transition.target(nextContext, event) : transition.target;
+      // Everything that can throw has run: commit the change all at once.
+      if (!Object.hasOwn(states, to)) throw new RangeError(`State "${from}" event "${event.type}" chose unknown state "${to}"`);
+      context = nextContext;
+      state = to;
+      history.push({ from, to, event });
       return snapshot();
     },
     reset() {
@@ -115,11 +123,11 @@ function assertWellFormed<S extends string, C, E extends MachineEvent>({
   initial,
   states,
 }: MachineDefinition<S, C, E>): void {
-  if (!(initial in states)) throw new RangeError(`Initial state "${initial}" is not defined`);
+  if (!Object.hasOwn(states, initial)) throw new RangeError(`Initial state "${initial}" is not defined`);
   for (const [name, definition] of Object.entries<StateDefinition<S, C, E>>(states)) {
     const transitions = Object.entries(definition.on ?? {}) as Array<[string, Transition<S, C, E> | undefined]>;
     for (const [type, transition] of transitions) {
-      if (transition && !(transition.target in states)) {
+      if (transition && typeof transition.target === 'string' && !Object.hasOwn(states, transition.target)) {
         throw new RangeError(`State "${name}" event "${type}" targets unknown state "${transition.target}"`);
       }
     }

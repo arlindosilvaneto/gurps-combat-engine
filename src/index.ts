@@ -18,6 +18,40 @@ export type {
   SuccessRollResult,
 } from './rules/success-roll.js';
 
+export { isWoundingType, resolveInjury, rollDamage, woundingMultiplier } from './rules/damage.js';
+export type { DamageRoll, InjuryResult, WoundingType } from './rules/damage.js';
+
+export { MANEUVER_EFFECTS, isAttackManeuver } from './combat/maneuvers.js';
+export type { Maneuver, ManeuverEffects } from './combat/maneuvers.js';
+export { combatantFromCharacter } from './combat/combatant.js';
+export type { AttackOption, Combatant, CombatantOptions, CombatantResult } from './combat/combatant.js';
+export { npcCombatant, npcGroup } from './combat/npcs.js';
+export type { NpcCombatantOptions, NpcGroupSpec } from './combat/npcs.js';
+export { listNpcs } from '@gurps-sheet/npcs';
+export type { NpcFilter, NpcSummary } from '@gurps-sheet/npcs';
+export { turnOrder } from './combat/turn-order.js';
+export type { Initiative } from './combat/turn-order.js';
+export { createCombat, CombatError } from './combat/combat.js';
+export type { Combat, CombatOptions, CombatView, FighterView } from './combat/combat.js';
+export { bestExpectedInjury, runToCompletion } from './combat/automation.js';
+export { diceDistribution, expectedInjury, successChance } from './combat/expectation.js';
+export type { ExpectedInjuryInput } from './combat/expectation.js';
+export type { Policy, RunOptions, RunResult } from './combat/automation.js';
+export { isAttackAction, ROLL_TAGS } from './combat/types.js';
+export type {
+  AttackAction,
+  AttackOutcome,
+  AttackResult,
+  CombatContext,
+  CombatEvent,
+  CombatState,
+  DamageOutcome,
+  FighterState,
+  PassiveAction,
+  TurnAction,
+  TurnResult,
+} from './combat/types.js';
+
 export { createMachine, InvalidTransitionError } from './machine/machine.js';
 export type {
   EventOf,

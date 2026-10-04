@@ -2,6 +2,7 @@
   "name": "gurps-combat-engine",
   "version": "0.1.0",
   "description": "Combat engine toolkit for GURPS 4th Edition: dice manager, roll modifiers, and a resettable combat state machine.",
+  "license": "UNLICENSED",
   "private": true,
   "type": "module",
   "exports": {
@@ -19,7 +20,8 @@
     "test:unit": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@gurps-sheet/character": "file:../gurps-sheet/packages/character"
+    "@gurps-sheet/character": "^0.1.0",
+    "@gurps-sheet/npcs": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
@@ -28,5 +30,20 @@
   },
   "engines": {
     "node": ">=20.19"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arlindosilvaneto/gurps-combat-engine.git"
+  },
+  "homepage": "https://github.com/arlindosilvaneto/gurps-combat-engine#readme",
+  "bugs": {
+    "url": "https://github.com/arlindosilvaneto/gurps-combat-engine/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
