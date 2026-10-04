@@ -12,8 +12,8 @@ npm run test:unit    # node --import tsx --test test/*.test.ts
 npm run build        # tsc -p tsconfig.build.json -> dist/ (what consumers import)
 node --import tsx --test test/dice.test.ts                       # one file
 node --import tsx --test --test-name-pattern="reset" test/*.test.ts   # one test by name
-node --import tsx src/cli/main.ts --help                         # the gurps-combat CLI, from source
-node --import tsx src/cli/main.ts --auto --seed 7 --npc fantasy-mercenary-knight:heroes --npc fantasy-town-guard:watch:2
+npm run cli                                                      # the gurps-combat CLI, from source (no build needed)
+npm run cli -- --auto --seed 7 --npc fantasy-mercenary-knight:heroes --npc fantasy-town-guard:watch:2   # flags go after --
 ```
 
 TypeScript (ESM, Node `>=20.19`), set up like `../gurps-sheet/packages/character`: `tsx` runs tests straight from `.ts`, `tsc` typechecks and builds. Relative imports use `.js` specifiers (nodenext), and `verbatimModuleSyntax` requires `import type` for type-only imports. `noUncheckedIndexedAccess` is on. There is no linter yet.

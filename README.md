@@ -237,6 +237,7 @@ Everything is exported from the package root and fully typed.
 npm install
 npm test         # typecheck, then the unit tests
 npm run build    # compile to dist/
+npm run cli      # run gurps-combat from source; pass flags after --, e.g. npm run cli -- --help
 ```
 
 A release is a version bump in a pull request: `npm version patch --no-git-tag-version`. Merging to `main` publishes it. npm may hold a new publish for approval with two-factor authentication before it goes live.

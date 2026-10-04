@@ -19,7 +19,8 @@
     "prepare": "npm run build",
     "typecheck": "tsc -p tsconfig.json",
     "test": "npm run typecheck && npm run test:unit",
-    "test:unit": "node --import tsx --test test/*.test.ts"
+    "test:unit": "node --import tsx --test test/*.test.ts",
+    "cli": "node --import tsx src/cli/main.ts"
   },
   "dependencies": {
     "@gurps-sheet/character": "^0.1.0",
