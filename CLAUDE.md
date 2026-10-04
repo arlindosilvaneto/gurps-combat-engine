@@ -22,7 +22,7 @@ TypeScript (ESM, Node `>=20.19`), set up like `../gurps-sheet/packages/character
 
 Set up like `../gurps-sheet` (`.github/workflows/`, `scripts/release.mjs`), adapted to a single package instead of a workspace.
 
-- **`ci.yml`** runs on pull requests and pushes to `main`. `test` runs `npm ci` (which builds `dist/` through `prepare`), `npm test` and `npm pack --dry-run` on Node 20.19 and 22. `release-check` (pull requests only) runs `node scripts/release.mjs check`.
+- **`ci.yml`** runs on pull requests and pushes to `main`. `test` runs `npm ci` (which builds `dist/` through `prepare`), `npm test` and `npm pack --dry-run` on Node 20.19 (the minimum in `engines`; there is no version matrix). `release-check` (pull requests only) runs `node scripts/release.mjs check`.
 - **`release.yml`** runs on pushes to `main` that touch `src/`, `package.json`, the lockfile or `tsconfig.build.json`, and by hand (`workflow_dispatch`, with a dry-run option). It runs the tests, then `node scripts/release.mjs publish`: publish if `package.json`'s version isn't on the registry yet (with provenance), then tag `vX.Y.Z` and create a GitHub release.
 - **A release is a version bump in the pull request** (`npm version patch --no-git-tag-version`). `check` fails a PR that changes `src/` or `package.json` without one, once the package is published. Test-only, docs and CI changes need no bump.
 - **`check` also rejects local-path dependencies**: a `file:` or `link:` dependency, or a `link: true` entry in `package-lock.json` (what `npm link` leaves behind). It runs even while the package is private.
