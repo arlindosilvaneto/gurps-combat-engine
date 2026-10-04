@@ -22,27 +22,27 @@ test('successChance counts the always-succeed 3-4 and the never-succeed 17-18', 
 
 test('expectedInjury without a dodge: chance to hit times the average injury after DR', () => {
   // 1d+1 cutting vs DR 3: totals 2..7 -> injury 0,0,1,3,4,6 (average 14/6).
-  close(expectedInjury({ skill: 30, damage: { notation: '1d+1', type: 'cut' }, targetDr: 3, dodge: null }), (212 / 216) * (14 / 6));
+  close(expectedInjury({ skill: 30, damage: { notation: '1d+1', type: 'cut' }, targetDr: 3, defense: null }), (212 / 216) * (14 / 6));
 });
 
 test('expectedInjury with a dodge: only critical hits, and the hits the dodge misses, land', () => {
   // Skill 30: totals 3-6 are critical hits (20 of 216 ways), 7-16 plain hits (192 ways).
   const dodged = 212 / 216;
   const landed = 20 / 216 + (192 / 216) * (1 - dodged);
-  close(expectedInjury({ skill: 30, damage: { notation: '1d+1', type: 'cut' }, targetDr: 3, dodge: 30 }), landed * (14 / 6));
+  close(expectedInjury({ skill: 30, damage: { notation: '1d+1', type: 'cut' }, targetDr: 3, defense: 30 }), landed * (14 / 6));
 });
 
 test('armor that stops everything means no expected injury, and a better dodge means less', () => {
-  assert.equal(expectedInjury({ skill: 15, damage: { notation: '1d', type: 'cr' }, targetDr: 10, dodge: null }), 0);
+  assert.equal(expectedInjury({ skill: 15, damage: { notation: '1d', type: 'cr' }, targetDr: 10, defense: null }), 0);
   const base = { skill: 14, damage: { notation: '2d', type: 'cut' as const }, targetDr: 0 };
-  assert.ok(expectedInjury({ ...base, dodge: 6 }) > expectedInjury({ ...base, dodge: 12 }));
-  assert.ok(expectedInjury({ ...base, dodge: null }) > expectedInjury({ ...base, dodge: 6 }));
+  assert.ok(expectedInjury({ ...base, defense: 6 }) > expectedInjury({ ...base, defense: 12 }));
+  assert.ok(expectedInjury({ ...base, defense: null }) > expectedInjury({ ...base, defense: 6 }));
 });
 
 test('damage floors apply: a 1d-3 crushing hit can do nothing, a 1d-3 cutting hit at least 1 basic', () => {
   // cr floor 0 -> injury 0 whenever the roll is <= 3; cut floor 1 -> always at least 1 basic damage.
-  const cr = expectedInjury({ skill: 30, damage: { notation: '1d-3', type: 'cr' }, targetDr: 0, dodge: null });
-  const cut = expectedInjury({ skill: 30, damage: { notation: '1d-3', type: 'cut' }, targetDr: 0, dodge: null });
+  const cr = expectedInjury({ skill: 30, damage: { notation: '1d-3', type: 'cr' }, targetDr: 0, defense: null });
+  const cut = expectedInjury({ skill: 30, damage: { notation: '1d-3', type: 'cut' }, targetDr: 0, defense: null });
   close(cr, (212 / 216) * ((0 + 0 + 0 + 1 + 2 + 3) / 6));
   // cut: basics 1,1,1,1,2,3 -> x1.5 rounded down: 1,1,1,1,3,4 = 11/6
   close(cut, (212 / 216) * (11 / 6));

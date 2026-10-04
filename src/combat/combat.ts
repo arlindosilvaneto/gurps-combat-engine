@@ -1,19 +1,27 @@
 import { applyDamage, getPool, type GurpsCharacter, type Pool } from '@gurps-sheet/character';
 import type { DiceManager } from '../dice/dice-manager.js';
 import { ModifierSet, type Modifier, type ModifierPatch, type NewModifier } from '../modifiers/modifier-set.js';
-import { createMachine, type Machine, type Snapshot } from '../machine/machine.js';
-import { resolveAttack } from './attack.js';
-import type { AttackOption, Combatant } from './combatant.js';
-import { MANEUVER_EFFECTS, type Maneuver } from './maneuvers.js';
+import { createMachine, type Machine, type Snapshot, type Transition } from '../machine/machine.js';
+import { rollAttack, rollHit } from './attack.js';
+import type { AttackOption, Combatant, ParryOption } from './combatant.js';
+import { defenseOptions, NO_DEFENSE, rollDefense, sameDefense } from './defense.js';
+import { MANEUVER_EFFECTS, type DefenseKind, type Maneuver } from './maneuvers.js';
 import { turnOrder } from './turn-order.js';
 import {
   isAttackAction,
+  type AttackResult,
   type CombatContext,
   type CombatEvent,
   type CombatState,
+  type DefenseChoice,
+  type DefenseOption,
+  type DefenseResult,
+  type DefenseUse,
   type FighterState,
+  type PendingAttack,
   type TurnAction,
   type TurnResult,
+  type TurnStep,
 } from './types.js';
 
 /** A request the current rules don't allow: the combat is unchanged. */
@@ -37,8 +45,12 @@ export interface FighterView {
   readonly side: string;
   readonly hp: Pool;
   readonly dodge: number;
+  readonly parries: readonly ParryOption[];
+  readonly block: number | null;
   readonly dr: number;
   readonly maneuver: Maneuver;
+  /** The defense its All-Out Defense raised, if that is its current maneuver. */
+  readonly increased: DefenseKind | null;
   /** Out of the fight (0 HP or less; the HT rolls to stay up aren't modelled yet). */
   readonly defeated: boolean;
   readonly attacks: readonly AttackOption[];
@@ -50,6 +62,10 @@ export interface CombatView {
   readonly round: number;
   /** Whose turn it is, or null once the fight is over. */
   readonly currentId: string | null;
+  /** Who must decide next: the fighter whose turn it is, or the defender of a pending attack. Null once over. */
+  readonly awaitingId: string | null;
+  /** The attack waiting for a defense, while `status` is `awaiting-defense`. */
+  readonly pending: PendingAttack | null;
   /** The side left standing, once the fight is over. None if the last fighters fell together. */
   readonly winner: string | null;
   /** Fighters in turn order. */
@@ -60,16 +76,24 @@ export interface Combat {
   view(): CombatView;
   /** The raw machine state and history, for logging or replay. Every event in the history is plain data. */
   snapshot(): Snapshot<CombatState, CombatContext, CombatEvent>;
-  /** Every action the current fighter may take right now. `takeTurn` accepts exactly these. */
+  /** Every action the current fighter may take right now (none while a defense is pending). `takeTurn` accepts exactly these. */
   legalActions(): readonly TurnAction[];
-  /** Resolves the current fighter's whole turn and passes play to the next one. Throws `CombatError` if the action isn't legal. */
-  takeTurn(action: TurnAction): TurnResult;
-  /** Throw `CombatError` once the fight is over or for an unknown fighter. */
+  /**
+   * Plays the current fighter's action. Returns the finished turn, or, when an attack hits a
+   * fighter who has a defense to choose, the pending attack: call `defend` to finish the turn.
+   * Throws `CombatError` if the action isn't legal.
+   */
+  takeTurn(action: TurnAction): TurnStep;
+  /** The defenses the defender of the pending attack may choose, `none` last. Empty when nothing is pending. */
+  legalDefenses(): readonly DefenseOption[];
+  /** Finishes the pending attack with the defender's choice. Throws `CombatError` if the choice isn't legal. */
+  defend(choice: DefenseChoice): TurnResult;
   /**
    * A fighter's sheet as it stands now, current HP included: for showing an NPC (or anyone) mid-fight.
    * It's a copy, so changing it changes nothing in the fight. Throws `CombatError` for an unknown fighter.
    */
   sheetOf(fighterId: string): GurpsCharacter;
+  /** Throw `CombatError` once the fight is over or for an unknown fighter. */
   addModifier(fighterId: string, modifier: NewModifier): Modifier;
   updateModifier(fighterId: string, modifierId: string, patch: ModifierPatch): void;
   removeModifier(fighterId: string, modifierId: string): void;
@@ -80,12 +104,25 @@ export interface Combat {
   reset(): void;
 }
 
+const FRESH_DEFENSES: DefenseUse = { parries: {}, blocked: false, retreated: false };
+
 const hpOf = (fighter: FighterState): Pool => getPool(fighter.character, 'hp');
 const isDefeated = (fighter: FighterState): boolean => hpOf(fighter).current <= 0;
 
 const sameAction = (a: TurnAction, b: TurnAction): boolean =>
   a.maneuver === b.maneuver &&
+  (a.maneuver !== 'all-out-defense' || (b.maneuver === 'all-out-defense' && a.increase === b.increase)) &&
   (!isAttackAction(a) || (isAttackAction(b) && a.attackId === b.attackId && a.targetId === b.targetId));
+
+/** The defense use a defender has after this one: limits that count per turn (pp.375-377). */
+function useDefense(use: DefenseUse, choice: DefenseChoice): DefenseUse {
+  if (choice.kind === 'none') return use;
+  return {
+    parries: choice.kind === 'parry' ? { ...use.parries, [choice.parryId]: (use.parries[choice.parryId] ?? 0) + 1 } : use.parries,
+    blocked: use.blocked || choice.kind === 'block',
+    retreated: use.retreated || choice.retreat,
+  };
+}
 
 export function createCombat(combatants: readonly Combatant[], { dice, clock = () => new Date() }: CombatOptions): Combat {
   // Our own copy: a caller changing its array later must not change this fight.
@@ -103,9 +140,12 @@ export function createCombat(combatants: readonly Combatant[], { dice, clock = (
   function startingContext(): CombatContext {
     const order = turnOrder(roster, dice);
     const fighters = Object.fromEntries(
-      roster.map((c): [string, FighterState] => [c.id, { character: c.character, maneuver: 'do-nothing', modifiers: new ModifierSet() }]),
+      roster.map((c): [string, FighterState] => [
+        c.id,
+        { character: c.character, maneuver: 'do-nothing', increased: null, attackedWith: null, defenseUse: FRESH_DEFENSES, modifiers: new ModifierSet() },
+      ]),
     );
-    return { round: 1, order, turnIndex: order.findIndex((id) => !isDefeated(fighters[id]!)), fighters, winner: null };
+    return { round: 1, order, turnIndex: order.findIndex((id) => !isDefeated(fighters[id]!)), fighters, pending: null, winner: null };
   }
 
   const fighterIn = (context: CombatContext, id: string): FighterState => {
@@ -113,23 +153,42 @@ export function createCombat(combatants: readonly Combatant[], { dice, clock = (
     return context.fighters[id]!;
   };
 
-  /** Applies a resolved turn: the actor's maneuver, any injury to the target and the actor, and who acts next. */
+  const attackOf = (pending: PendingAttack): AttackOption =>
+    byId.get(pending.actorId)!.attacks.find((attack) => attack.id === pending.attackId)!;
+
+  /**
+   * Applies a resolved turn: the actor starts a new turn (maneuver, a fresh set of per-turn
+   * defenses, the weapon it attacked with), the defender spends its defense, both take any
+   * injury, and play passes to the next fighter standing.
+   */
   function applyTurn(context: CombatContext, { result, at }: Extract<CombatEvent, { type: 'RESOLVE_TURN' }>): CombatContext {
     const fighters: Record<string, FighterState> = { ...context.fighters };
-    fighters[result.actorId] = { ...fighters[result.actorId]!, maneuver: result.maneuver };
+    const attack = result.attack;
+    const weapon = attack ? (byId.get(result.actorId)!.attacks.find((option) => option.id === attack.attackId)?.weapon ?? null) : null;
+    fighters[result.actorId] = {
+      ...fighters[result.actorId]!,
+      maneuver: result.maneuver,
+      increased: result.increase,
+      attackedWith: weapon,
+      defenseUse: FRESH_DEFENSES,
+    };
 
     const hurt = (id: string, injury: number | undefined) => {
       if (!injury || injury <= 0) return;
       const fighter = fighters[id]!;
       fighters[id] = { ...fighter, character: applyDamage(fighter.character, injury, { now: at }) };
     };
-    if (result.attack) {
-      hurt(result.attack.targetId, result.attack.damage?.injury.injury);
-      hurt(result.actorId, result.attack.selfInjury?.injury);
+    if (attack) {
+      if (attack.defense) {
+        const target = fighters[attack.targetId]!;
+        fighters[attack.targetId] = { ...target, defenseUse: useDefense(target.defenseUse, attack.defense.choice) };
+      }
+      hurt(attack.targetId, attack.damage?.injury.injury);
+      hurt(result.actorId, attack.selfInjury?.injury);
     }
 
     const standing = sidesStanding(fighters);
-    if (standing.length <= 1) return { ...context, fighters, winner: standing[0] ?? null };
+    if (standing.length <= 1) return { ...context, fighters, pending: null, winner: standing[0] ?? null };
 
     const count = context.order.length;
     for (let step = 1; step <= count; step += 1) {
@@ -137,17 +196,36 @@ export function createCombat(combatants: readonly Combatant[], { dice, clock = (
       if (!isDefeated(fighters[context.order[index]!]!)) {
         // Passing the end of the order, or coming back round to the same fighter, starts a new second.
         const wrapped = context.turnIndex + step >= count;
-        return { ...context, fighters, turnIndex: index, round: context.round + (wrapped ? 1 : 0) };
+        return { ...context, fighters, pending: null, turnIndex: index, round: context.round + (wrapped ? 1 : 0) };
       }
     }
-    return { ...context, fighters };
+    return { ...context, fighters, pending: null };
   }
 
-  /** Replaces one fighter's modifiers. Reducers can't throw on bad input after committing: the machine only commits once they return. */
+  /** Replaces one fighter's modifiers. The machine commits only once this returns, so a bad id changes nothing. */
   const withModifiers = (context: CombatContext, fighterId: string, change: (set: ModifierSet) => ModifierSet): CombatContext => {
     const fighter = fighterIn(context, fighterId);
     return { ...context, fighters: { ...context.fighters, [fighterId]: { ...fighter, modifiers: change(fighter.modifiers) } } };
   };
+
+  // Over when at most one side is left, which includes everyone falling together (no winner).
+  const afterTurn = (context: CombatContext): CombatState => (sidesStanding(context.fighters).length <= 1 ? 'finished' : 'in-progress');
+
+  /** Modifier changes are allowed whenever the fight is on, and leave the state as it was. */
+  const modifierTransitions = (state: CombatState) => ({
+    ADD_MODIFIER: {
+      target: state,
+      assign: (context, { fighterId, modifier }) => withModifiers(context, fighterId, (set) => set.add(modifier).set),
+    } satisfies Transition<CombatState, CombatContext, Extract<CombatEvent, { type: 'ADD_MODIFIER' }>>,
+    UPDATE_MODIFIER: {
+      target: state,
+      assign: (context, { fighterId, modifierId, patch }) => withModifiers(context, fighterId, (set) => set.update(modifierId, patch)),
+    } satisfies Transition<CombatState, CombatContext, Extract<CombatEvent, { type: 'UPDATE_MODIFIER' }>>,
+    REMOVE_MODIFIER: {
+      target: state,
+      assign: (context, { fighterId, modifierId }) => withModifiers(context, fighterId, (set) => set.remove(modifierId)),
+    } satisfies Transition<CombatState, CombatContext, Extract<CombatEvent, { type: 'REMOVE_MODIFIER' }>>,
+  });
 
   const machine: Machine<CombatState, CombatContext, CombatEvent> = createMachine<CombatState, CombatContext, CombatEvent>({
     initial: 'in-progress',
@@ -158,22 +236,25 @@ export function createCombat(combatants: readonly Combatant[], { dice, clock = (
           RESOLVE_TURN: {
             guard: (context, event) => context.order[context.turnIndex] === event.result.actorId,
             assign: applyTurn,
-            // Over when at most one side is left, which includes everyone falling together (no winner).
-            target: (context) => (sidesStanding(context.fighters).length <= 1 ? 'finished' : 'in-progress'),
+            target: afterTurn,
           },
-          ADD_MODIFIER: {
-            target: 'in-progress',
-            assign: (context, { fighterId, modifier }) => withModifiers(context, fighterId, (set) => set.add(modifier).set),
+          AWAIT_DEFENSE: {
+            guard: (context, event) => context.order[context.turnIndex] === event.pending.actorId,
+            assign: (context, { pending }) => ({ ...context, pending }),
+            target: 'awaiting-defense',
           },
-          UPDATE_MODIFIER: {
-            target: 'in-progress',
-            assign: (context, { fighterId, modifierId, patch }) =>
-              withModifiers(context, fighterId, (set) => set.update(modifierId, patch)),
+          ...modifierTransitions('in-progress'),
+        },
+      },
+      'awaiting-defense': {
+        on: {
+          RESOLVE_TURN: {
+            guard: (context, { result }) =>
+              context.pending?.actorId === result.actorId && context.pending.targetId === result.attack?.targetId,
+            assign: applyTurn,
+            target: afterTurn,
           },
-          REMOVE_MODIFIER: {
-            target: 'in-progress',
-            assign: (context, { fighterId, modifierId }) => withModifiers(context, fighterId, (set) => set.remove(modifierId)),
-          },
+          ...modifierTransitions('awaiting-defense'),
         },
       },
       finished: {},
@@ -186,12 +267,19 @@ export function createCombat(combatants: readonly Combatant[], { dice, clock = (
     return context;
   };
 
-  /** The one place that decides what is legal; `takeTurn` accepts exactly these. */
+  /** The one place that decides which actions are legal; `takeTurn` accepts exactly these. */
   function legalActions(): TurnAction[] {
     const { state, context } = machine.snapshot();
-    if (state === 'finished') return [];
+    if (state !== 'in-progress') return [];
     const actor = byId.get(context.order[context.turnIndex]!)!;
-    const actions: TurnAction[] = [{ maneuver: 'do-nothing' }, { maneuver: 'all-out-defense' }];
+    // All-Out Defense can raise any defense the fighter actually has.
+    const raisable: DefenseKind[] = ['dodge'];
+    if (actor.parries.length > 0) raisable.push('parry');
+    if (actor.block !== null) raisable.push('block');
+    const actions: TurnAction[] = [
+      { maneuver: 'do-nothing' },
+      ...raisable.map((increase): TurnAction => ({ maneuver: 'all-out-defense', increase })),
+    ];
     for (const attack of actor.attacks) {
       for (const target of roster) {
         if (target.side === actor.side || isDefeated(context.fighters[target.id]!)) continue;
@@ -207,6 +295,7 @@ export function createCombat(combatants: readonly Combatant[], { dice, clock = (
   /** Why an action isn't legal, for the error message only: legality itself is decided by `legalActions`. */
   function explainIllegal(actor: Combatant, action: TurnAction, context: CombatContext): string {
     if (!Object.hasOwn(MANEUVER_EFFECTS, action.maneuver)) return `Unknown maneuver "${action.maneuver}"`;
+    if (action.maneuver === 'all-out-defense') return `${actor.name} can't raise "${action.increase}" with All-Out Defense`;
     if (!isAttackAction(action)) return `${actor.name} can't take ${action.maneuver} now`;
     if (!actor.attacks.some((option) => option.id === action.attackId)) return `${actor.name} has no attack "${action.attackId}"`;
     const target = byId.get(action.targetId);
@@ -216,36 +305,95 @@ export function createCombat(combatants: readonly Combatant[], { dice, clock = (
     return `${actor.name} can't ${action.maneuver} ${target.name} with ${action.attackId} now`;
   }
 
-  function takeTurn(action: TurnAction): TurnResult {
-    const context = assertOngoing();
+  /** Records the finished attack turn and passes play on. */
+  function finish(pending: PendingAttack, rest: Omit<AttackResult, 'targetId' | 'attackId' | 'attackRoll'>): TurnResult {
+    const result: TurnResult = {
+      round: pending.round,
+      actorId: pending.actorId,
+      maneuver: pending.maneuver,
+      increase: null,
+      attack: { targetId: pending.targetId, attackId: pending.attackId, attackRoll: pending.attackRoll, ...rest },
+    };
+    machine.send({ type: 'RESOLVE_TURN', result, at: clock() });
+    return result;
+  }
+
+  /** Rolls a hit's damage and finishes the turn. */
+  function finishHit(pending: PendingAttack, criticalHit: boolean, defense: DefenseResult | null): TurnResult {
+    const { damage, selfInjury } = rollHit(dice, attackOf(pending), byId.get(pending.targetId)!);
+    return finish(pending, { criticalHit, defense, outcome: 'hit', damage, selfInjury });
+  }
+
+  function takeTurn(action: TurnAction): TurnStep {
+    const { state, context } = machine.snapshot();
+    if (state === 'finished') throw new CombatError('The combat is over');
+    if (state === 'awaiting-defense') {
+      throw new CombatError(`Waiting for ${byId.get(context.pending!.targetId)!.name} to choose a defense`);
+    }
     const actor = byId.get(context.order[context.turnIndex]!)!;
     if (!legalActions().some((legal) => sameAction(legal, action))) {
       throw new CombatError(explainIllegal(actor, action, context));
     }
 
-    const base = { round: context.round, actorId: actor.id, maneuver: action.maneuver };
-    let result: TurnResult;
-    if (isAttackAction(action)) {
-      // Legal, so both the attack and the target exist.
-      const attack = actor.attacks.find((option) => option.id === action.attackId)!;
-      const target = byId.get(action.targetId)!;
-      result = {
-        ...base,
-        attack: resolveAttack({
-          dice,
-          attackerState: context.fighters[actor.id]!,
-          maneuver: action.maneuver,
-          attack,
-          target,
-          targetState: context.fighters[target.id]!,
-        }),
+    if (!isAttackAction(action)) {
+      const result: TurnResult = {
+        round: context.round,
+        actorId: actor.id,
+        maneuver: action.maneuver,
+        increase: action.maneuver === 'all-out-defense' ? action.increase : null,
+        attack: null,
       };
-    } else {
-      result = { ...base, attack: null };
+      machine.send({ type: 'RESOLVE_TURN', result, at: clock() });
+      return { status: 'resolved', result };
     }
 
-    machine.send({ type: 'RESOLVE_TURN', result, at: clock() });
-    return result;
+    // Legal, so both the attack and the target exist.
+    const attack = actor.attacks.find((option) => option.id === action.attackId)!;
+    const target = byId.get(action.targetId)!;
+    const attackRoll = rollAttack(dice, context.fighters[actor.id]!, action.maneuver, attack);
+    const pending: PendingAttack = {
+      round: context.round,
+      actorId: actor.id,
+      maneuver: action.maneuver,
+      attackId: attack.id,
+      targetId: target.id,
+      attackRoll,
+    };
+
+    if (!attackRoll.success) {
+      return { status: 'resolved', result: finish(pending, { criticalHit: false, defense: null, outcome: 'miss', damage: null, selfInjury: null }) };
+    }
+    // A critical hit can't be defended against (p.374), and neither can anyone without a legal defense.
+    const criticalHit = attackRoll.outcome === 'critical-success';
+    if (criticalHit || defenseOptions(target, context.fighters[target.id]!, attack).length === 0) {
+      return { status: 'resolved', result: finishHit(pending, criticalHit, null) };
+    }
+    machine.send({ type: 'AWAIT_DEFENSE', pending });
+    return { status: 'awaiting-defense', pending };
+  }
+
+  function legalDefenses(): DefenseOption[] {
+    const { state, context } = machine.snapshot();
+    if (state !== 'awaiting-defense' || !context.pending) return [];
+    const { pending } = context;
+    return [...defenseOptions(byId.get(pending.targetId)!, context.fighters[pending.targetId]!, attackOf(pending)), NO_DEFENSE];
+  }
+
+  function defend(choice: DefenseChoice): TurnResult {
+    const { state, context } = machine.snapshot();
+    if (state !== 'awaiting-defense' || !context.pending) throw new CombatError('No attack is waiting for a defense');
+    const { pending } = context;
+    const target = byId.get(pending.targetId)!;
+    if (!legalDefenses().some((option) => sameDefense(option.choice, choice))) {
+      throw new CombatError(`${target.name} can't use that defense now`);
+    }
+    if (choice.kind === 'none') return finishHit(pending, false, { choice, roll: null });
+
+    const roll = rollDefense(dice, choice, target, context.fighters[target.id]!, attackOf(pending));
+    if (roll.success) {
+      return finish(pending, { criticalHit: false, defense: { choice, roll }, outcome: 'defended', damage: null, selfInjury: null });
+    }
+    return finishHit(pending, false, { choice, roll });
   }
 
   /** Checks the fight is on and the fighter exists, so these refusals are `CombatError`s. */
@@ -255,14 +403,19 @@ export function createCombat(combatants: readonly Combatant[], { dice, clock = (
     snapshot: machine.snapshot,
     legalActions,
     takeTurn,
+    legalDefenses,
+    defend,
     reset: machine.reset,
 
     view() {
       const { state, context } = machine.snapshot();
+      const currentId = state === 'finished' ? null : (context.order[context.turnIndex] ?? null);
       return {
         status: state,
         round: context.round,
-        currentId: state === 'finished' ? null : (context.order[context.turnIndex] ?? null),
+        currentId,
+        awaitingId: state === 'awaiting-defense' ? (context.pending?.targetId ?? null) : currentId,
+        pending: state === 'awaiting-defense' ? context.pending : null,
         winner: context.winner,
         fighters: context.order.map((id): FighterView => {
           const combatant = byId.get(id)!;
@@ -273,8 +426,11 @@ export function createCombat(combatants: readonly Combatant[], { dice, clock = (
             side: combatant.side,
             hp: hpOf(fighter),
             dodge: combatant.dodge,
+            parries: combatant.parries,
+            block: combatant.block,
             dr: combatant.dr,
             maneuver: fighter.maneuver,
+            increased: fighter.increased,
             defeated: isDefeated(fighter),
             attacks: combatant.attacks,
             modifiers: fighter.modifiers.list(),

@@ -13,9 +13,9 @@ test('Rurik: the axe matches "Machado/Maça" and swing damage adds up', () => {
   assert.equal(combatant.dr, 4, 'torso DR');
   assert.deepEqual(combatant.attacks, [
     // swing is 2d-1 for his ST, and the axe adds +2
-    { id: 'Machado#1', name: 'Machado', skill: 13, damage: { notation: '2d+1', type: 'cut' }, unarmed: false },
+    { id: 'Machado#1', name: 'Machado', skill: 13, damage: { notation: '2d+1', type: 'cut' }, unarmed: false, weapon: 'Machado', strike: 'swing' },
     // thrust 1d, punch is -1; Brawling 12 is below DX+2, so no bonus
-    { id: 'punch', name: 'Punch', skill: 12, damage: { notation: '1d-1', type: 'cr' }, unarmed: true },
+    { id: 'punch', name: 'Punch', skill: 12, damage: { notation: '1d-1', type: 'cr' }, unarmed: true, weapon: null, strike: 'thrust' },
   ]);
 });
 
@@ -23,7 +23,7 @@ test('a character with no weapons still punches if they know Brawling', () => {
   const { combatant } = combatantFromCharacter(loadExample('jotun.json'), { side: 'b', id: 'wolf' });
   assert.equal(combatant.id, 'wolf');
   assert.equal(combatant.dr, 0, 'no DR entries means 0');
-  assert.deepEqual(combatant.attacks, [{ id: 'punch', name: 'Punch', skill: 14, damage: { notation: '2d-2', type: 'cr' }, unarmed: true }]);
+  assert.deepEqual(combatant.attacks, [{ id: 'punch', name: 'Punch', skill: 14, damage: { notation: '2d-2', type: 'cr' }, unarmed: true, weapon: null, strike: 'thrust' }]);
 });
 
 test('Brawling at DX+2 or better adds +1 per die to the punch (Basic Set p.182)', () => {
@@ -131,4 +131,33 @@ test('DR on other locations only is fine; only an unclassified entry is worth a 
 test('a weapon mapped to a skill the sheet lacks says so', () => {
   const { warnings } = combatantFromCharacter(loadExample('rurik.json'), { side: 'a', weaponSkills: { Machado: 'Foice' } });
   assert.match(warnings[0] ?? '', /mapped to skill "Foice", which Rurik Bjornsson doesn't have/);
+});
+
+test('parries and block come from the sheet: one parry per weapon, with its parry modifier (p.376)', () => {
+  const { combatant } = combatantFromCharacter(loadExample('rurik.json'), { side: 'a' });
+  // Axe skill 13: 3 + 13/2 = 9, parry "0U" (unbalanced). The sheet's own Parry is 9 too.
+  assert.deepEqual(combatant.parries, [
+    { id: 'Machado', name: 'Machado', value: 9, unbalanced: true, fencing: false, unarmed: false, retreatBonus: 1 },
+  ]);
+  assert.equal(combatant.block, 10, 'Block from the sheet (Shield 14)');
+});
+
+test('a fighter without weapons parries bare-handed with the better of its unarmed skill and DX (p.376)', () => {
+  const { combatant } = combatantFromCharacter(loadExample('jotun.json'), { side: 'b' });
+  // Brawling 14 beats DX 13: 3 + 14/2 = 10. Brawling isn't a "mobile" skill, so a retreat is only +1.
+  assert.deepEqual(combatant.parries, [
+    { id: 'bare-hands', name: 'Bare hands', value: 10, unbalanced: false, fencing: false, unarmed: true, retreatBonus: 1 },
+  ]);
+  assert.equal(combatant.block, null);
+});
+
+test('a weapon whose parry is "No" can\'t parry, and one with no parry on the sheet says so', () => {
+  const sheet = loadExample('rurik.json');
+  sheet.weapons!.melee![0]!.parry = { notation: 'No', modifier: null };
+  assert.deepEqual(combatantFromCharacter(sheet, { side: 'a' }).combatant.parries, []);
+
+  delete sheet.weapons!.melee![0]!.parry;
+  const { combatant, warnings } = combatantFromCharacter(sheet, { side: 'a' });
+  assert.deepEqual(combatant.parries, []);
+  assert.match(warnings.join(), /"Machado" has no parry on the sheet/);
 });

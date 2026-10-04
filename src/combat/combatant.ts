@@ -10,6 +10,26 @@ export interface AttackOption {
   readonly damage: { readonly notation: string; readonly type: WoundingType };
   /** A strike with the body (the punch). Hitting armor with one can hurt the attacker (Basic Set p.379). */
   readonly unarmed: boolean;
+  /** The weapon this attack is made with, or null for an unarmed strike. */
+  readonly weapon: string | null;
+  /** Swing or thrust, when known: a bare-handed parry is harder against a swung weapon (p.377). */
+  readonly strike: 'swing' | 'thrust' | null;
+}
+
+/** One way a combatant can parry: with a weapon, or bare-handed (Basic Set pp.376-377). */
+export interface ParryOption {
+  /** The weapon's name, or "bare-hands". */
+  readonly id: string;
+  readonly name: string;
+  /** 3 + half the skill, plus the weapon's parry modifier. */
+  readonly value: number;
+  /** An unbalanced ("U") weapon can't parry once it has attacked this turn. */
+  readonly unbalanced: boolean;
+  /** A fencing ("F") weapon: extra parries cost -2 each instead of -4. */
+  readonly fencing: boolean;
+  readonly unarmed: boolean;
+  /** Parry bonus for retreating: +3 for fencing weapons and Boxing, Judo or Karate, else +1 (p.377). */
+  readonly retreatBonus: 1 | 3;
 }
 
 /**
@@ -28,6 +48,10 @@ export interface Combatant {
   /** Torso DR. Hit locations are not modelled yet, so every hit lands on the torso (p.378). */
   readonly dr: number;
   readonly attacks: readonly AttackOption[];
+  /** Ways it can parry. Empty if none of its weapons can (a lance) and it isn't fighting bare-handed. */
+  readonly parries: readonly ParryOption[];
+  /** Block (3 + half the Shield skill) from the sheet, or null without a shield skill. Shield DB is not included. */
+  readonly block: number | null;
   /** The sheet this fighter starts from. A reset restores HP from it. */
   readonly character: GurpsCharacter;
 }
@@ -54,6 +78,9 @@ const normalize = (text: string): string =>
     .trim();
 
 const UNARMED_SKILLS = new Set(['brawling', 'briga']);
+/** Skills that parry bare-handed (p.376), and those of them that get +3 for a retreat (p.377). */
+const BARE_HAND_PARRY_SKILLS = new Set(['boxing', 'boxe', 'brawling', 'briga', 'judo', 'karate', 'carate']);
+const MOBILE_PARRY_SKILLS = new Set(['boxing', 'boxe', 'judo', 'karate', 'carate']);
 
 /**
  * Builds a combatant from a sheet. The sheet doesn't link weapons to skills, so a
@@ -92,6 +119,8 @@ export function combatantFromCharacter(character: GurpsCharacter, options: Comba
     dodge: stats.dodge,
     dr: torso?.dr ?? 0,
     attacks,
+    parries: parryOptions(stats, attacks, warnings),
+    block: stats.block.value ?? null,
     character,
   };
   return { combatant, warnings };
@@ -101,13 +130,15 @@ function diceNotation(count: number, adds: number): string {
   return `${count}d${adds > 0 ? `+${adds}` : adds < 0 ? String(adds) : ''}`;
 }
 
+type SkillRef = { readonly name: string; readonly level: number };
+
 /** A skill by its full name ("Machado/Maça") or by any one "/"-separated part of it ("Machado"). */
-function findSkillLevel(stats: CombatStats, skillName: string): number | undefined {
+function findSkill(stats: CombatStats, skillName: string): SkillRef | undefined {
   const wanted = normalize(skillName);
   return stats.skills.find((skill) => {
     const name = normalize(skill.name);
     return name === wanted || name.split('/').some((part) => part.trim() === wanted);
-  })?.level;
+  });
 }
 
 /**
@@ -116,23 +147,26 @@ function findSkillLevel(stats: CombatStats, skillName: string): number | undefin
  * name starts the weapon's ("Espada" for "Espada larga"), so a longer, more exact skill
  * is never shadowed by a shorter one that happens to come first on the sheet.
  */
-function skillForWeapon(stats: CombatStats, weaponName: string, overrides: Readonly<Record<string, string>>) {
-  if (Object.hasOwn(overrides, weaponName)) return findSkillLevel(stats, overrides[weaponName]!);
-  const exact = findSkillLevel(stats, weaponName);
+function skillForWeapon(stats: CombatStats, weaponName: string, overrides: Readonly<Record<string, string>>): SkillRef | undefined {
+  if (Object.hasOwn(overrides, weaponName)) return findSkill(stats, overrides[weaponName]!);
+  const exact = findSkill(stats, weaponName);
   if (exact !== undefined) return exact;
   const wanted = normalize(weaponName);
   return stats.skills.find((skill) =>
     normalize(skill.name)
       .split('/')
       .some((part) => wanted.startsWith(`${part.trim()} `)),
-  )?.level;
+  );
 }
+
+/** The Lance skill is for fighting from horseback (Basic Set p.204), and mounted combat isn't modelled. */
+const MOUNTED_SKILLS = new Set(['lance', 'lanca']);
 
 function meleeAttacks(stats: CombatStats, overrides: Readonly<Record<string, string>>, warnings: string[]): AttackOption[] {
   const attacks: AttackOption[] = [];
   for (const weapon of stats.weapons.melee) {
-    const skill = skillForWeapon(stats, weapon.name, overrides);
-    if (skill === undefined) {
+    const found = skillForWeapon(stats, weapon.name, overrides);
+    if (found === undefined) {
       warnings.push(
         Object.hasOwn(overrides, weapon.name)
           ? `Weapon "${weapon.name}" is mapped to skill "${overrides[weapon.name]}", which ${stats.name} doesn't have`
@@ -140,6 +174,11 @@ function meleeAttacks(stats: CombatStats, overrides: Readonly<Record<string, str
       );
       continue;
     }
+    if (MOUNTED_SKILLS.has(normalize(found.name))) {
+      warnings.push(`Weapon "${weapon.name}" uses ${found.name}, which is for mounted combat (p.204), not modelled yet`);
+      continue;
+    }
+    const skill = found.level;
     (weapon.damage ?? []).forEach((mode, index) => {
       const { type } = mode;
       if (type === undefined) {
@@ -165,6 +204,8 @@ function meleeAttacks(stats: CombatStats, overrides: Readonly<Record<string, str
         skill,
         damage: { notation: diceNotation(damage.dice, damage.adds), type },
         unarmed: false,
+        weapon: weapon.name,
+        strike: mode.base === 'thrust' || mode.base === 'swing' ? mode.base : null,
       });
     });
   }
@@ -185,7 +226,7 @@ function damageFor(
 }
 
 /**
- * A punch (Basic Set p.269: thr-1 cr). Brawling at DX+2 or better adds +1 per die
+ * A punch (Basic Set p.271: thr-1 cr). Brawling at DX+2 or better adds +1 per die
  * to basic thrust damage (p.182).
  */
 function unarmedAttacks(stats: CombatStats): AttackOption[] {
@@ -200,6 +241,56 @@ function unarmedAttacks(stats: CombatStats): AttackOption[] {
       skill: brawling.level,
       damage: { notation: diceNotation(dice, adds - 1 + bonus), type: 'cr' },
       unarmed: true,
+      weapon: null,
+      strike: 'thrust',
     },
   ];
+}
+
+/**
+ * Parries (Basic Set pp.376-377). Each melee weapon the fighter can attack with parries at
+ * 3 + half its skill plus the weapon's parry modifier, unless its parry is "No". A fighter
+ * without melee weapons parries bare-handed at 3 + half its best Boxing, Brawling, Judo or
+ * Karate, or DX if that is higher. (Whether a hand is free isn't tracked, so a fighter with
+ * weapons never gets the bare-handed parry.)
+ */
+function parryOptions(stats: CombatStats, attacks: readonly AttackOption[], warnings: string[]): ParryOption[] {
+  const parries: ParryOption[] = [];
+  for (const weapon of stats.weapons.melee) {
+    const skill = attacks.find((attack) => attack.weapon === weapon.name)?.skill;
+    if (skill === undefined || parries.some((parry) => parry.id === weapon.name)) continue;
+    if (!weapon.parry) {
+      warnings.push(`Weapon "${weapon.name}" has no parry on the sheet, so it can't parry`);
+      continue;
+    }
+    if (weapon.parry.modifier === null || weapon.parry.modifier === undefined) continue; // "No": can't parry
+    const fencing = /F/i.test(weapon.parry.notation);
+    parries.push({
+      id: weapon.name,
+      name: weapon.name,
+      value: 3 + Math.floor(skill / 2) + weapon.parry.modifier,
+      unbalanced: weapon.parry.unbalanced ?? /U/i.test(weapon.parry.notation),
+      fencing,
+      unarmed: false,
+      retreatBonus: fencing ? 3 : 1,
+    });
+  }
+
+  if (stats.weapons.melee.length === 0) {
+    const skill = stats.skills
+      .filter((candidate) => BARE_HAND_PARRY_SKILLS.has(normalize(candidate.name)))
+      .reduce<{ name: string; level: number } | undefined>((best, candidate) => (!best || candidate.level > best.level ? candidate : best), undefined);
+    const usesSkill = skill !== undefined && skill.level > stats.attributes.dx;
+    const level = usesSkill ? skill.level : stats.attributes.dx;
+    parries.push({
+      id: 'bare-hands',
+      name: 'Bare hands',
+      value: 3 + Math.floor(level / 2),
+      unbalanced: false,
+      fencing: false,
+      unarmed: true,
+      retreatBonus: usesSkill && MOBILE_PARRY_SKILLS.has(normalize(skill.name)) ? 3 : 1,
+    });
+  }
+  return parries;
 }
