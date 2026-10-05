@@ -1,6 +1,6 @@
 {
-  "name": "@gurps-sheet/engine",
-  "version": "0.3.0",
+  "name": "@gurps-sheet/combat-engine",
+  "version": "0.3.1",
   "description": "Combat engine for GURPS 4th Edition: rules-faithful melee with Dodge, Parry and Block, shock, major wounds and stun, a dice manager, roll modifiers, a resettable combat state machine, and a gurps-combat CLI.",
   "license": "UNLICENSED",
   "type": "module",

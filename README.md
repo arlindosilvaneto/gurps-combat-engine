@@ -1,4 +1,4 @@
-# @gurps-sheet/engine
+# @gurps-sheet/combat-engine
 
 A combat engine for **GURPS 4th Edition**, written as a library. It takes characters in the [`gurps-character`](https://www.npmjs.com/package/@gurps-sheet/character) format, runs a fight by the Basic Set rules, and tells you exactly what happened: every roll, every modifier, every point of injury.
 
@@ -20,7 +20,7 @@ It is the core that other tools build on, such as a VTT bridge or a test harness
 ## Install
 
 ```bash
-npm install @gurps-sheet/engine
+npm install @gurps-sheet/combat-engine
 ```
 
 That also installs `@gurps-sheet/character` and `@gurps-sheet/npcs`, which the engine depends on, and `@inquirer/prompts`, which only the command-line tool uses.
@@ -33,7 +33,7 @@ Add it as a normal dependency and import from the package root. There is nothing
 {
   "type": "module",
   "dependencies": {
-    "@gurps-sheet/engine": "^0.3.0"
+    "@gurps-sheet/combat-engine": "^0.3.1"
   }
 }
 ```
@@ -56,7 +56,7 @@ import {
   seededSource,
   bestExpectedInjury,
   runToCompletion,
-} from '@gurps-sheet/engine';
+} from '@gurps-sheet/combat-engine';
 
 const knight = npcCombatant('fantasy-mercenary-knight', { side: 'heroes' }).combatant;
 const guards = npcGroup({ npc: 'fantasy-town-guard', side: 'watch', count: 3 }).map((g) => g.combatant);
@@ -78,7 +78,7 @@ Load a `gurps-character` file with the sheet library, then turn it into a combat
 ```js
 import { readFileSync } from 'node:fs';
 import { parseCharacter } from '@gurps-sheet/character';
-import { combatantFromCharacter } from '@gurps-sheet/engine';
+import { combatantFromCharacter } from '@gurps-sheet/combat-engine';
 
 const { character } = parseCharacter(readFileSync('hero.json', 'utf8'));
 const { combatant, warnings } = combatantFromCharacter(character, { side: 'players' });
@@ -94,7 +94,7 @@ A sheet does not record which skill a weapon uses, so the engine matches a weapo
 This is the loop an interactive front end runs. `legalActions()` lists everything the current fighter may do, and `takeTurn()` plays it. When an attack hits a fighter who can defend, the turn waits: `legalDefenses()` lists that fighter's choices, each with the number it would roll against, and `defend()` finishes the turn.
 
 ```js
-import { createCombat, createDiceManager, npcCombatant } from '@gurps-sheet/engine';
+import { createCombat, createDiceManager, npcCombatant } from '@gurps-sheet/combat-engine';
 
 const a = npcCombatant('fantasy-mercenary-knight', { side: 'a' }).combatant;
 const b = npcCombatant('fantasy-town-guard', { side: 'b' }).combatant;
@@ -123,7 +123,7 @@ Each finished turn is plain data: the attack roll, the defense chosen and rolled
 ### Change modifiers, look at sheets, start over
 
 ```js
-import { createCombat, createDiceManager, npcCombatant } from '@gurps-sheet/engine';
+import { createCombat, createDiceManager, npcCombatant } from '@gurps-sheet/combat-engine';
 
 const knight = npcCombatant('fantasy-mercenary-knight', { side: 'a' }).combatant;
 const guard = npcCombatant('fantasy-town-guard', { side: 'b' }).combatant;
@@ -145,7 +145,7 @@ A modifier with an empty `appliesTo` applies to every roll. Otherwise list the r
 Everything random goes through the dice manager, so you choose how.
 
 ```js
-import { createDiceManager, randomSource, seededSource, scriptedSource, createTable } from '@gurps-sheet/engine';
+import { createDiceManager, randomSource, seededSource, scriptedSource, createTable } from '@gurps-sheet/combat-engine';
 
 createDiceManager(); // real randomness
 createDiceManager({ source: seededSource(42) }); // reproducible
@@ -173,8 +173,8 @@ A scripted source throws if it runs out of faces or a face is impossible for the
 `gurps-combat` sets up and runs fights in the terminal, with arrow-key menus.
 
 ```bash
-npx -p @gurps-sheet/engine gurps-combat           # without installing
-npm install -g @gurps-sheet/engine && gurps-combat
+npx -p @gurps-sheet/combat-engine gurps-combat           # without installing
+npm install -g @gurps-sheet/combat-engine && gurps-combat
 ```
 
 With no options it opens the setup screen:
