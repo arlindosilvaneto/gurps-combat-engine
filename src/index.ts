@@ -19,6 +19,8 @@ export type {
 } from './rules/success-roll.js';
 
 export { isWoundingType, resolveInjury, rollDamage, woundingMultiplier } from './rules/damage.js';
+export { isMajorWound, knockdownOutcome, MAX_SHOCK, shockPenalty } from './rules/injury.js';
+export type { KnockdownOutcome } from './rules/injury.js';
 export type { DamageRoll, InjuryResult, WoundingType } from './rules/damage.js';
 
 export { MANEUVER_EFFECTS, isAttackManeuver } from './combat/maneuvers.js';

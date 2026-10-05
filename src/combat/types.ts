@@ -3,6 +3,7 @@ import type { DiceRoll } from '../dice/dice-manager.js';
 import type { ModifierPatch, ModifierSet, NewModifier } from '../modifiers/modifier-set.js';
 import type { SuccessRollResult } from '../rules/success-roll.js';
 import type { InjuryResult, WoundingType } from '../rules/damage.js';
+import type { KnockdownOutcome } from '../rules/injury.js';
 import { isAttackManeuver, type DefenseKind, type Maneuver } from './maneuvers.js';
 
 /** Tags that select which modifiers apply to a roll (see `ModifierSet.total`). */
@@ -13,6 +14,8 @@ export const ROLL_TAGS = {
   dodge: 'dodge',
   parry: 'parry',
   block: 'block',
+  /** HT rolls: a major wound's knockdown roll and the roll to recover from stun. */
+  ht: 'ht',
 } as const;
 
 export interface DoNothingAction {
@@ -80,6 +83,16 @@ export interface DamageOutcome {
   readonly injury: InjuryResult;
 }
 
+/** What an injury did beyond the HP: shock, and for a major wound, the HT roll and its outcome (pp.380, 419-420). */
+export interface InjuryEffects {
+  /** Shock points (a penalty on the victim's next turn) this injury caused, before the -4 cap on the total. */
+  readonly shock: number;
+  readonly majorWound: boolean;
+  /** The HT roll a major wound calls for; null if there was none (or the victim was already down). */
+  readonly knockdownRoll: SuccessRollResult | null;
+  readonly knockdown: KnockdownOutcome;
+}
+
 export interface DefenseResult {
   readonly choice: DefenseChoice;
   /** Null when the defender chose `none`. */
@@ -102,6 +115,10 @@ export interface AttackResult {
    * doesn't apply: only unarmed hits on a target with DR 3 or more.
    */
   readonly selfInjury: InjuryResult | null;
+  /** Shock and major-wound effects on the target, when it took injury. */
+  readonly targetEffects: InjuryEffects | null;
+  /** The same for the attacker, when punching armor injured it. */
+  readonly attackerEffects: InjuryEffects | null;
 }
 
 /** Everything that happened in one turn: also the payload of the `RESOLVE_TURN` event. */
@@ -112,6 +129,8 @@ export interface TurnResult {
   /** The defense an All-Out Defense raised, otherwise null. */
   readonly increase: DefenseKind | null;
   readonly attack: AttackResult | null;
+  /** A stunned fighter's HT roll, at the end of its Do Nothing turn, to shake off the stun (pp.364, 420). */
+  readonly recovery: SuccessRollResult | null;
 }
 
 /** Defenses a fighter has used since its own last turn: they are limited per turn (pp.375-377). */
@@ -122,6 +141,19 @@ export interface DefenseUse {
   readonly blocked: boolean;
   /** One retreat per turn. */
   readonly retreated: boolean;
+}
+
+/**
+ * Conditions the engine tracks for a fighter (the character sheet only stores HP and FP).
+ *  - `shock`: penalty points on DX- and IQ-based rolls during its next turn, at most 4 (p.419).
+ *  - `stun`: `stunned` must Do Nothing, defends at -4 and can't retreat; `recovering` has shaken
+ *    it off but still defends at -4 until its next turn (pp.364, 420).
+ *  - `unconscious`: out of the fight (a major wound's HT roll failed by 5+, p.420).
+ */
+export interface Conditions {
+  readonly shock: number;
+  readonly stun: 'none' | 'stunned' | 'recovering';
+  readonly unconscious: boolean;
 }
 
 /** One fighter's state during the fight. */
@@ -135,6 +167,7 @@ export interface FighterState {
   /** The weapon it attacked with on its last turn: an unbalanced one can't parry until its next turn (p.376). */
   readonly attackedWith: string | null;
   readonly defenseUse: DefenseUse;
+  readonly conditions: Conditions;
   /** Situational modifiers added during the fight. */
   readonly modifiers: ModifierSet;
 }

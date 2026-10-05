@@ -6,7 +6,7 @@ It is the core that other tools build on, such as a VTT bridge or a test harness
 
 - **Written in TypeScript, shipped as ES modules** (`dist/`, with declarations and source maps). Requires Node ≥ 20.19.
 - **Built on the sheet libraries.** Characters come from [`@gurps-sheet/character`](https://www.npmjs.com/package/@gurps-sheet/character), and ready-made NPCs from [`@gurps-sheet/npcs`](https://www.npmjs.com/package/@gurps-sheet/npcs). Both install with it.
-- **Early version (0.2).** Melee combat with Dodge, Parry and Block works end to end. See [What is and isn't implemented](#what-is-and-isnt-implemented) before relying on it.
+- **Early version (0.3).** Melee combat with Dodge, Parry and Block, shock, major wounds and stun works end to end. See [What is and isn't implemented](#what-is-and-isnt-implemented) before relying on it.
 
 ## Goals
 
@@ -15,7 +15,7 @@ It is the core that other tools build on, such as a VTT bridge or a test harness
 3. **Reproducible by construction.** Every random outcome goes through one dice manager. Give it real randomness, a seed, or a script of exact die faces, and the same fight plays out the same way.
 4. **Modifiers you can change mid-fight.** Add, edit or remove a situational modifier at any time. Later rolls change; rolls already made don't.
 5. **Interactive or automated, on the same engine.** A person, a script or the built-in policy picks from `legalActions()`, and `takeTurn()` accepts exactly those actions.
-6. **The engine owns combat conditions.** The sheet only stores current HP and FP. Shock, stun and the like belong to the fight, not to the character document. (They are not implemented yet.)
+6. **The engine owns combat conditions.** The sheet only stores current HP and FP. Shock, stun and unconsciousness belong to the fight, not to the character document, so a reset clears them.
 
 ## Install
 
@@ -33,7 +33,7 @@ Add it as a normal dependency and import from the package root. There is nothing
 {
   "type": "module",
   "dependencies": {
-    "@gurps-sheet/engine": "^0.2.0"
+    "@gurps-sheet/engine": "^0.3.0"
   }
 }
 ```
@@ -138,7 +138,7 @@ combat.snapshot().history; // every event so far, as plain data you can JSON.str
 combat.reset(); // the same fight again from the start
 ```
 
-A modifier with an empty `appliesTo` applies to every roll. Otherwise list the roll tags it affects: `attack`, `defense` (every defense), or one of `dodge`, `parry` and `block`.
+A modifier with an empty `appliesTo` applies to every roll. Otherwise list the roll tags it affects: `attack`, `defense` (every defense), one of `dodge`, `parry` and `block`, or `ht` (HT rolls).
 
 ### Control the dice
 
@@ -204,12 +204,13 @@ For example, `gurps-combat --auto --seed 7 --npc fantasy-mercenary-knight:heroes
 - Melee attack and damage: DR, wounding modifiers, minimum damage, and the self-injury from punching armor (pp.369, 378-379).
 - Active defenses (pp.374-377): Dodge, Parry with each weapon (unbalanced and fencing weapons, -4 or -2 per extra parry, bare-handed parries at -3 against swung weapons), Block once per turn, and Retreat once per turn. All-Out Defense raises the defense you choose (p.366). Defenders choose; the AI picks the best number.
 - Brawling punches, including the damage bonus at DX+2 (pp.182, 271).
+- Injury effects (pp.364, 380, 419-420): **shock** (-1 per HP lost, or per HP/10 with 20+ HP, at most -4, on the victim's next attacks only); **major wounds** (a single injury over half the HP) call for an HT roll that can **stun** or knock the victim out; a stunned fighter must Do Nothing, defends at -4 without retreating, and rolls HT each turn to recover.
 - An automated driver that ranks attacks by exact expected injury against the target's best defense, and chooses All-Out Attack only when it pays.
 
 **Simplified for now:**
 - **No shield DB or Combat Reflexes bonus on defenses.** A retreat is always possible, since there is no battle map.
 - **Every hit lands on the torso.** There are no hit locations.
-- **A fighter is out at 0 HP or less.** Shock, stun, knockdown, the HT rolls at 0 HP, mortal wounds and death are not implemented.
+- **A fighter is out at 0 HP or less** (or unconscious). The HT rolls at 0 HP and below, mortal wounds and death are not implemented. A knockdown stuns, but falling prone isn't modelled (no postures).
 - **A critical hit only removes the defense.** The Critical Hit and Critical Miss tables (p.556) are not applied.
 - **Melee only, on foot.** Ranged weapons, lances (mounted combat) and the other nine maneuvers are not modelled. NPCs whose only weapons are ranged (casters, doctors, shooters) have no attack yet; the engine reports why.
 - **Dodge ignores encumbrance and low HP.**
@@ -226,7 +227,7 @@ These are limits of this version, not rules choices. Where the sheet or the rule
 | Automation | `runToCompletion`, `bestExpectedInjury`, `bestDefense`, `expectedInjury`, `successChance`, the `Policy` and `DefensePolicy` types |
 | Dice | `createDiceManager`, `randomSource`, `seededSource`, `scriptedSource`, `createTable`, `parseNotation` |
 | Modifiers | `ModifierSet`, plus `addModifier`, `updateModifier` and `removeModifier` on a combat |
-| Rules | `rollSuccess`, `classifyRoll`, `resolveInjury`, `rollDamage`, `MANEUVER_EFFECTS` |
+| Rules | `rollSuccess`, `classifyRoll`, `resolveInjury`, `rollDamage`, `shockPenalty`, `isMajorWound`, `knockdownOutcome`, `MANEUVER_EFFECTS` |
 | State machine | `createMachine`, `InvalidTransitionError` (the generic machine the combat is built on) |
 
 Everything is exported from the package root and fully typed.

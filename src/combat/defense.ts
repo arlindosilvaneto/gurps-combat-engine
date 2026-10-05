@@ -25,12 +25,14 @@ const withBonus = (set: ModifierSet, label: string, value: number, kind: Defense
  *  - Retreat, once per turn: +3 Dodge, +1 Block, +1 Parry (+3 with fencing weapons or Boxing,
  *    Judo, Karate).
  *  - All-Out Defense: +2 to the defense it raised.
+ *  - Stun: every defense at -4, and no retreat while stunned; the -4 lasts until the fighter's
+ *    next turn even after it recovers (pp.364, 374, 420). Shock never affects defenses (p.374).
  * Not modelled: shield DB, Combat Reflexes, off-hand and thrown-weapon penalties, and the
  * retreat bonus carrying over to the same attacker's later attacks.
  */
 function defenseRoll(choice: DefenseChoice, defender: Combatant, state: FighterState, attack: AttackOption): DefenseRoll | null {
   if (choice.kind === 'none' || !MANEUVER_EFFECTS[state.maneuver].canDefend) return null;
-  if (choice.retreat && state.defenseUse.retreated) return null;
+  if (choice.retreat && (state.defenseUse.retreated || state.conditions.stun === 'stunned')) return null;
 
   const kind = choice.kind;
   let skill: number;
@@ -62,6 +64,7 @@ function defenseRoll(choice: DefenseChoice, defender: Combatant, state: FighterS
     modifiers = withBonus(modifiers, 'All-Out Defense', MANEUVER_EFFECTS['all-out-defense'].defenseBonus, kind);
   }
   if (choice.retreat) modifiers = withBonus(modifiers, 'Retreat', retreatBonus, kind);
+  if (state.conditions.stun !== 'none') modifiers = withBonus(modifiers, 'Stunned', -4, kind);
   return { skill, modifiers, tags: [ROLL_TAGS.defense, ROLL_TAGS[kind]] };
 }
 

@@ -6,14 +6,17 @@ import { MANEUVER_EFFECTS, type Maneuver } from './maneuvers.js';
 import { ROLL_TAGS, type DamageOutcome, type FighterState } from './types.js';
 
 /**
- * The attack roll (Basic Set p.369): skill plus the attacker's modifiers and its
- * maneuver's bonus. A roll that succeeds hits unless the target defends; 3-4 always
- * hits and is a critical hit, 17-18 always misses (classifyRoll covers both).
+ * The attack roll (Basic Set p.369): skill plus the attacker's modifiers, its maneuver's
+ * bonus, and any shock from injuries since its last turn (p.419: melee skills are DX-based).
+ * A roll that succeeds hits unless the target defends; 3-4 always hits and is a critical
+ * hit, 17-18 always misses (classifyRoll covers both).
  */
 export function rollAttack(dice: DiceManager, attackerState: FighterState, maneuver: Maneuver, attack: AttackOption): SuccessRollResult {
+  let modifiers = attackerState.modifiers;
   const bonus = MANEUVER_EFFECTS[maneuver].attackBonus;
-  const modifiers =
-    bonus === 0 ? attackerState.modifiers : attackerState.modifiers.add({ label: maneuver, value: bonus, appliesTo: [ROLL_TAGS.attack] }).set;
+  if (bonus !== 0) modifiers = modifiers.add({ label: maneuver, value: bonus, appliesTo: [ROLL_TAGS.attack] }).set;
+  const { shock } = attackerState.conditions;
+  if (shock > 0) modifiers = modifiers.add({ label: 'Shock', value: -shock, appliesTo: [ROLL_TAGS.attack] }).set;
   return rollSuccess(dice, { skill: attack.skill, modifiers, tags: [ROLL_TAGS.attack] });
 }
 

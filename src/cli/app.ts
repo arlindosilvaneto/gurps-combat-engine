@@ -186,7 +186,8 @@ async function fight(io: CliIO, combat: Combat, controlled: ReadonlySet<string>,
 
 /** The menu for a fighter the user controls. Returns a value only to leave the fight. */
 async function turnMenu(io: CliIO, combat: Combat, actor: FighterView): Promise<AfterFight | undefined> {
-  const choice = await io.prompt.select(`${actor.name}'s turn. What do you do?`, [
+  const stunned = actor.conditions.stun === 'stunned' ? ' (stunned: only Do Nothing)' : '';
+  const choice = await io.prompt.select(`${actor.name}'s turn${stunned}. What do you do?`, [
     { name: 'Take my turn', value: 'turn' as const },
     { name: 'Let the AI decide this turn', value: 'ai' as const },
     { name: 'Modifiers', value: 'modifiers' as const },
@@ -235,7 +236,7 @@ async function chooseAction(io: CliIO, view: CombatView, actor: FighterView, leg
   const maneuver = await io.prompt.select('Which maneuver?', [
     { name: 'Attack', value: 'attack' as const, disabled: has('attack') ? false : 'nothing to attack with' },
     { name: 'All-Out Attack', value: 'all-out-attack' as const, description: '+4 to hit, but no defense until your next turn', disabled: !has('all-out-attack') },
-    { name: 'All-Out Defense', value: 'all-out-defense' as const, description: '+2 to one defense until your next turn' },
+    { name: 'All-Out Defense', value: 'all-out-defense' as const, description: '+2 to one defense until your next turn', disabled: !has('all-out-defense') },
     { name: 'Do Nothing', value: 'do-nothing' as const },
     { name: 'Back', value: 'back' as const },
   ]);
